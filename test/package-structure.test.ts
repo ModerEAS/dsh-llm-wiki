@@ -48,6 +48,22 @@ describe("package structure", () => {
     ]);
   });
 
+  // @tobilu/qmd pins @modelcontextprotocol/server, zod and node-llama-cpp at
+  // exact versions, and @earendil-works/pi-coding-agent pins undici at an exact
+  // version, so a vulnerable release keeps resolving for every consumer install
+  // no matter which ranges we declare. npm honours `overrides` only from the
+  // root package, so re-pinning the patched versions is ours to maintain (issue #321).
+  it("pins patched versions of vulnerable transitive dependencies (issue #321)", () => {
+    const pkg = JSON.parse(readFile(join(rootDir, "package.json")));
+    expect(pkg.pnpm.overrides).toEqual({
+      undici: "8.12.3",
+      zod: "^4.6.7",
+      "@modelcontextprotocol/server": "2.4.0",
+      "simple-git": "4.0.2",
+      "@simple-git/argv-parser": "2.0.1",
+    });
+  });
+
   it("keeps Claude plugin and marketplace metadata aligned with the package", () => {
     const pkg = JSON.parse(readFile(join(rootDir, "package.json"))) as {
       name: string;
@@ -368,6 +384,36 @@ describe("package structure", () => {
         expect(path, `${name} documents a path that ships no JavaScript`).toContain(entry);
       }
     }
+  });
+
+  // The consumer-facing override block exists in three places: pnpm.overrides,
+  // test/fixtures/consumer-audit/package.json (which the consumer-audit CI job
+  // installs into), and docs/dependency-security.md. One map, three copies —
+  // keep the fixture identical to what the repo ships (issue #321).
+  it("keeps the consumer audit fixture overrides equal to pnpm.overrides", () => {
+    const pkg = JSON.parse(readFile(join(rootDir, "package.json")));
+    const fixture = JSON.parse(
+      readFile(join(rootDir, "test", "fixtures", "consumer-audit", "package.json")),
+    );
+    expect(fixture.overrides).toEqual(pkg.pnpm.overrides);
+    expect(fixture.private).toBe(true);
+    expect(fixture.name).toBe("pi-llm-wiki-consumer-audit");
+  });
+
+  // docs/dependency-security.md is the remediation consumers copy. If an
+  // override key or version changes in package.json and the doc is not updated,
+  // the documented fix is wrong, so compare the quoted JSON `"key": "version"`
+  // pairs for every key in pnpm.overrides (issue #321).
+  it("documents every pnpm.overrides entry in docs/dependency-security.md", () => {
+    const pkg = JSON.parse(readFile(join(rootDir, "package.json")));
+    const overrides = pkg.pnpm.overrides as Record<string, string>;
+    const doc = readFile(join(rootDir, "docs", "dependency-security.md"));
+    expect(doc.split("\n")[0]).toBe("# Dependency Security");
+    for (const [key, version] of Object.entries(overrides)) {
+      expect(doc, `${key}: ${version}`).toContain(`"${key}": "${version}"`);
+    }
+    expect(doc).toContain("npm install-scripts approve");
+    expect(doc).toContain("npm audit fix --force");
   });
 });
 
