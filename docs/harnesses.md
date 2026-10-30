@@ -1,11 +1,20 @@
 # Harness support
 
-`pi-llm-wiki` has two ways to connect a harness to the same vault:
+`pi-llm-wiki` has three ways to connect a harness to a vault:
 
 - **Native extension:** pi and oh-my-pi load the extension, skills, slash commands,
   ambient recall, background tasks, and host-specific guardrails.
+- **Native DSH plugin:** DeepSeek Harness loads `dsh/` (see `docs/dsh.md`) —
+  guardrails, recall injection, slash commands, background synthesis, and a
+  settings section. Draft status; verify live before relying on it.
 - **MCP server:** any MCP-capable client starts `dist/mcp/index.js` over stdio and
   receives the 15 model-free/request-driven wiki tools, including `wiki_ingest`.
+
+> **Pick ONE lane per vault.** The native DSH plugin and the MCP server must
+> not run against the same vault at the same time — both write `meta/`
+> projections and guard `raw/`, so two writers interleave rebuilds and
+> confuse each other's locks. Native plugin inside DeepSeek Harness, MCP for
+> every other client.
 
 ## Choose your harness
 

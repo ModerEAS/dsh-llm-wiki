@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "LLM Wiki",
+    "description": "自维护、兼容 Obsidian 的知识库：采集、入库、召回与轨迹记忆。"
+  },
+  "title": "LLM Wiki",
+  "subtitle": "此配置文件的知识库行为。",
+  "save": "保存",
+  "discard": "放弃",
+  "close": "关闭",
+  "unavailable": "设置不可用"
+}

@@ -293,9 +293,19 @@ export function readJson<T>(path: string, defaultValue: T): T {
   }
 }
 
-/** Write JSON file atomically. */
+/** Write JSON file atomically via temp-file + rename.
+ *
+ * DSH-PATCH (dsh-native plugin, H30): the previous body was an in-place
+ * `writeFileSync` despite the "atomically" comment, so interleaved
+ * rebuilds (HMR generations, concurrent sessions) could truncate
+ * `registry.json`. Temp-file + rename keeps the same signature; concurrent
+ * writers in one process are additionally serialized by the DSH layer's
+ * per-vault write queue (src/dsh/vault-state.ts).
+ */
 export function writeJson(path: string, data: unknown): void {
-  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  renameSync(tmp, path);
 }
 
 /** Read text file or return empty string. */

@@ -63,6 +63,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "build:commands": "node scripts/build-commands.js",
+    "build:dsh": "node scripts/build-dsh.js",
     "build:mcp": "node scripts/build-mcp.js",
     "prepack": "node scripts/build-commands.js && node scripts/build-mcp.js",
     "typecheck": "tsc --noEmit",
