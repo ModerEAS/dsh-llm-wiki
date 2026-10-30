@@ -29,6 +29,7 @@ release cycle; the MCP server (`mcp/`) is kept as an alternative access path.
 
 Settings live in the Settings panel → **LLM Wiki** section (WebUI), with
 `/wiki-model` and `/wiki-trajectories` as command-line equivalents.
+Settings → Agent presets also lists **LLM Wiki synthesis** (child synthesis lane).
 Pure queries are slash commands (`/wiki-status`, `/wiki-search`,
 `/wiki-recall`, `/wiki-lint`); work-initiating commands (`/wiki-bootstrap`,
 `/wiki-capture`, `/wiki-ingest`) queue a followup prompt so upstream

@@ -10,3 +10,22 @@
         autoRecall: true
         notices: true
         trajectories: false
+    # Synthesis child preset (T6.3/H13): persona-only, outputSchema/JSON
+    # handoff. Appears in Settings → Agent presets as "LLM Wiki synthesis".
+    # Never sets registry `default` (stays Standard / user choice) and never
+    # touches the main Standard preset (H13: no commit tools in main mode).
+    - id: preset-llm-wiki-synthesis
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: llm-wiki-synthesis
+        order: 5
+        name: LLM Wiki synthesis
+        description: Synthesis-only child for wiki ingest (outputSchema / JSON handoff).
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                You synthesize wiki pages. Reply with structured JSON only when asked.
+                Do not call commit tools unless they are in your tool list.
+              complete: true
