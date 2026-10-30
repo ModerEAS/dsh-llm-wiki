@@ -20,12 +20,16 @@
  *   pressure with the same `ctx.tokenMeter` as compaction-basic, kicking in
  *   at ~90% of its threshold) and re-drains on the `compaction/start`
  *   session event as a backstop. It never blocks compaction itself.
- * - LLM-touching background work (`needsLlm`, e.g. ingest synthesis) never
- *   starts mid-turn: it waits for the origin agent to go idle, then runs
- *   inside `agent.runMaintenance`, so no new turn opens, no model request
- *   contends with the foreground turn on the single transport (T5/T6), and
- *   concurrent background LLM calls serialize on the exclusive maintenance
- *   phase. Disk-only work (light rebuilds) still starts immediately.
+ * - LLM-touching background work (`needsLlm`, e.g. ingest synthesis) must not
+ *   start mid-turn (TRANSPORT contention, T5/T6). It also must not wait on
+ *   `whenIdle` *outside* the headless runner's own `await whenIdle()` —
+ *   headless registers first, then exits if `waitForChildren` is empty, so a
+ *   post-idle start races process exit. Fix: shadow `agent.whenIdle` once so
+ *   after the real idle settles we drain this agent's needsLlm queue *inside*
+ *   that same whenIdle call (headless therefore waits for synthesis). Do NOT
+ *   use `runMaintenance`: status maps maintenance → `"idle"`, so headless
+ *   still exits without children. Concurrent needsLlm tasks share one
+ *   process-wide promise chain. Disk-only work still starts immediately.
  */
 
 import type { WikiLogger } from "./logger.js";
@@ -46,12 +50,10 @@ export interface DshRuntime {
     label: string;
     agent: DshAgent | undefined;
     vaultRoot: string;
-    /** LLM-touching work: wait for the origin agent to go idle, then run as
-     * a maintenance task (no new turn, no transport contention, serialized
-     * with other background LLM work). Disk-only work omits this and starts
-     * immediately. Falls back to an immediate detached run when the origin
-     * agent offers no idle primitives (unknown host) or is gone while the
-     * process lives (H28). */
+    /** LLM-touching work: enqueue until wrapped `whenIdle` drains (no mid-turn
+     * TRANSPORT; headless idle wait includes the drain). Disk-only omits this.
+     * Detached fallback when idle primitives are missing or the origin agent
+     * is gone (H28). */
     needsLlm?: boolean;
     work: (signal: AbortSignal) => Promise<string | null>;
     report?: (summary: string) => void;
@@ -62,129 +64,149 @@ export interface DshRuntime {
   dispose(): void;
 }
 
-/** Idle primitives observed on a live DSH agent (all optional in the wild). */
-interface IdleCapable {
-  whenIdle(): Promise<void>;
-  runMaintenance<T>(job: (signal: AbortSignal) => Promise<T>): Promise<T>;
-  isDriving(): boolean;
-}
+type NeedsLlmJob = {
+  signal: AbortSignal;
+  work: (sig: AbortSignal) => Promise<string | null>;
+  resolve: (value: string | null) => void;
+  reject: (error: unknown) => void;
+};
 
-function asIdleCapable(agent: DshAgent | undefined): IdleCapable | undefined {
-  const whenIdle = (agent as { whenIdle?: unknown } | undefined)?.whenIdle;
-  const runMaintenance = (agent as { runMaintenance?: unknown } | undefined)?.runMaintenance;
-  if (typeof whenIdle !== "function" || typeof runMaintenance !== "function") {
-    return undefined;
-  }
-  const whenIdleFn = whenIdle as () => Promise<void>;
-  const runMaintenanceFn = runMaintenance as <T>(
-    job: (signal: AbortSignal) => Promise<T>,
-  ) => Promise<T>;
-  return {
-    whenIdle: () => whenIdleFn.call(agent),
-    // `.call` on a generic function infers `unknown`, so re-assert per instantiation.
-    runMaintenance: <T>(job: (signal: AbortSignal) => Promise<T>): Promise<T> =>
-      runMaintenanceFn.call(agent, job) as Promise<T>,
-    isDriving: () => (agent as { status?: unknown })?.status === "running",
-  };
-}
+/** Process-wide serial chain for needsLlm background work (one transport). */
+let llmChain: Promise<void> = Promise.resolve();
+
+const patchedAgents = new WeakSet<object>();
+const agentQueues = new WeakMap<object, NeedsLlmJob[]>();
+const agentOrigWhenIdle = new WeakMap<object, () => Promise<void>>();
+const drainingAgents = new WeakSet<object>();
 
 function abortError(signal: AbortSignal): Error {
   const reason = signal.reason;
   return reason instanceof Error ? reason : new Error("aborted");
 }
 
-function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(abortError(signal));
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortError(signal));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
+function isDriving(agent: DshAgent | undefined): boolean {
+  return (agent as { status?: unknown } | undefined)?.status === "running";
+}
+
+function runOnLlmChain<T>(fn: () => Promise<T>): Promise<T> {
+  let result!: T;
+  let failure: unknown;
+  let failed = false;
+  const turn = async () => {
+    try {
+      result = await fn();
+    } catch (error) {
+      failed = true;
+      failure = error;
+    }
+  };
+  const next = llmChain.then(turn, turn);
+  llmChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next.then(() => {
+    if (failed) throw failure;
+    return result;
   });
 }
 
-/** Abort when EITHER the task is cancelled (unload) or the maintenance phase ends. */
-function linkSignals(parent: AbortSignal, maint: AbortSignal): AbortSignal {
-  if (parent.aborted) return parent;
-  if (maint.aborted) return maint;
-  const controller = new AbortController();
-  const onAbort = () => {
-    try {
-      controller.abort(parent.aborted ? parent.reason : maint.reason);
-    } catch {
-      /* abort() itself never throws usefully here */
+async function drainAgentQueue(agent: object): Promise<void> {
+  if (drainingAgents.has(agent)) return;
+  drainingAgents.add(agent);
+  try {
+    for (;;) {
+      const queue = agentQueues.get(agent);
+      if (!queue || queue.length === 0) return;
+      const job = queue.shift()!;
+      if (job.signal.aborted) {
+        job.reject(abortError(job.signal));
+        continue;
+      }
+      try {
+        const summary = await runOnLlmChain(() => job.work(job.signal));
+        job.resolve(summary);
+      } catch (error) {
+        job.reject(error);
+      }
     }
-    parent.removeEventListener("abort", onAbort);
-    maint.removeEventListener("abort", onAbort);
-  };
-  parent.addEventListener("abort", onAbort, { once: true });
-  maint.addEventListener("abort", onAbort, { once: true });
-  return controller.signal;
-}
-
-function idleOrAborted(idle: IdleCapable, signal: AbortSignal): Promise<void> {
-  return Promise.race([
-    idle.whenIdle(),
-    new Promise<never>((_resolve, reject) => {
-      if (signal.aborted) reject(abortError(signal));
-      else signal.addEventListener("abort", () => reject(abortError(signal)), { once: true });
-    }),
-  ]);
+  } finally {
+    drainingAgents.delete(agent);
+  }
 }
 
 /**
- * Run LLM-touching `work` only once the origin agent is idle, claimed as a
- * maintenance task: no new turn opens, no model request contends with the
- * foreground turn on the single transport, and concurrent background LLM
- * calls serialize on the exclusive maintenance phase (T5/T6). A lost claim
- * race (a new turn, or another maintenance, won the phase) re-waits; a
- * gone/inconsistent agent with a live process runs detached instead (H28)
- * — never on another session.
+ * Shadow `agent.whenIdle` so callers (especially headless) wait for our
+ * needsLlm drain after true idle. Safe to call repeatedly.
  */
-async function runAfterIdle(
-  idle: IdleCapable,
+export function ensureWhenIdleDrain(agent: DshAgent): void {
+  const whenIdle = (agent as { whenIdle?: unknown }).whenIdle;
+  if (typeof whenIdle !== "function") return;
+  if (patchedAgents.has(agent as object)) return;
+  patchedAgents.add(agent as object);
+  const orig = () => (whenIdle as () => Promise<void>).call(agent);
+  agentOrigWhenIdle.set(agent as object, orig);
+  if (!agentQueues.has(agent as object)) agentQueues.set(agent as object, []);
+  (agent as unknown as { whenIdle: () => Promise<void> }).whenIdle = async () => {
+    try {
+      await orig();
+    } catch {
+      // Origin gone mid-turn (H28): fall through and drain detached.
+    }
+    await drainAgentQueue(agent as object);
+  };
+}
+
+function enqueueNeedsLlm(
+  agent: DshAgent,
   signal: AbortSignal,
   work: (sig: AbortSignal) => Promise<string | null>,
-  logger?: WikiLogger,
 ): Promise<string | null> {
-  // Consecutive claim failures while NOT driving are logically impossible on
-  // a consistent agent (single thread: the phase cannot change between the
-  // throw and the status read, so an idle status means another maintenance
-  // holds the phase and our re-wait follows it to completion). Cap them so
-  // a dead/inconsistent agent can never microtask-spin the process.
-  let idleClaimFailures = 0;
-  for (;;) {
-    signal.throwIfAborted();
-    try {
-      await idleOrAborted(idle, signal);
-    } catch (error) {
-      if (signal.aborted) throw error;
-      if (idle.isDriving()) {
-        // Pathological (whenIdle itself failed mid-turn): back off, re-wait.
-        await abortableSleep(500, signal);
-        continue;
-      }
-      logger?.info("background task: origin agent gone, running detached");
-      return work(signal);
+  ensureWhenIdleDrain(agent);
+  // Pre-wrap original for the progress fiber below (never the wrapper: awaiting
+  // that here would deadlock with its own drain).
+  const originalIdle = agentOrigWhenIdle.get(agent as object);
+  return new Promise<string | null>((resolve, reject) => {
+    const queue = agentQueues.get(agent as object) ?? [];
+    agentQueues.set(agent as object, queue);
+    const job: NeedsLlmJob = { signal, work, resolve, reject };
+    const onAbort = () => {
+      const idx = queue.indexOf(job);
+      if (idx >= 0) queue.splice(idx, 1);
+      reject(abortError(signal));
+    };
+    // Abort (dispose) must settle even if no drain ever runs — otherwise
+    // launchTask/drainSession hang forever on a queue nobody drains.
+    if (signal.aborted) {
+      reject(abortError(signal));
+      return;
     }
-    let claimed: Promise<string | null>;
-    try {
-      claimed = idle.runMaintenance((maintSignal) => work(linkSignals(signal, maintSignal)));
-    } catch {
-      if (signal.aborted) throw abortError(signal);
-      if (!idle.isDriving() && ++idleClaimFailures >= 100) {
-        logger?.info("background task: origin agent unclaimable, running detached");
-        return work(signal);
-      }
-      continue;
+    queue.push(job);
+    signal.addEventListener("abort", onAbort, { once: true });
+    // Already idle: nobody will call whenIdle until the next turn — drain now.
+    if (!isDriving(agent)) {
+      queueMicrotask(() => {
+        if (signal.aborted) return;
+        void drainAgentQueue(agent as object).catch(() => undefined);
+      });
+    } else if (originalIdle) {
+      // Detached progress fiber: a turn that ends with nobody awaiting the
+      // wrapped whenIdle (interactive sessions) still drains.
+      void (async () => {
+        try {
+          await originalIdle();
+        } catch {
+          // H28: agent gone — drain detached anyway.
+        }
+        if (signal.aborted) return;
+        try {
+          await drainAgentQueue(agent as object);
+        } catch {
+          // Per-item errors already settle their jobs; never crash the fiber.
+        }
+      })();
     }
-    return claimed;
-  }
+  });
 }
 
 export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRuntime {
@@ -237,10 +259,18 @@ export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRunti
     promise = (async () => {
       try {
         if (disposed) return;
-        const idle = opts.needsLlm === true ? asIdleCapable(origin) : undefined;
-        const summary = idle
-          ? await runAfterIdle(idle, controller.signal, opts.work, logger)
-          : await opts.work(controller.signal);
+        let summary: string | null;
+        if (opts.needsLlm === true) {
+          const whenIdle = (origin as { whenIdle?: unknown } | undefined)?.whenIdle;
+          if (origin && typeof whenIdle === "function") {
+            summary = await enqueueNeedsLlm(origin, controller.signal, opts.work);
+          } else {
+            logger?.info("background task: origin agent gone, running detached");
+            summary = await runOnLlmChain(() => opts.work(controller.signal));
+          }
+        } else {
+          summary = await opts.work(controller.signal);
+        }
         if (summary) {
           if (opts.report) {
             try {
@@ -307,6 +337,30 @@ export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRunti
     ctx.effect?.(() => dispose, "llm-wiki background runtime");
   } catch {
     /* headless harnesses may lack ctx.effect */
+  }
+
+  // Patch whenIdle at agent birth so headless's in-flight await includes our drain.
+  function patchAgent(agent: DshAgent | undefined): void {
+    if (!agent) return;
+    try {
+      ensureWhenIdleDrain(agent);
+    } catch (error) {
+      logger?.warn(`whenIdle drain patch failed: ${(error as Error).message}`);
+    }
+  }
+  try {
+    for (const agent of ctx.agents?.list?.() ?? []) patchAgent(agent);
+  } catch {
+    /* optional service */
+  }
+  try {
+    if (typeof ctx.on === "function") {
+      ctx.on("agent/created", ((payload: { agent?: DshAgent }) => {
+        patchAgent(payload?.agent);
+      }) as (...args: never[]) => unknown);
+    }
+  } catch {
+    /* best effort */
   }
 
   return { launchTask, drainSession, awaitAll, pendingCount, dispose };

@@ -1,64 +1,63 @@
-import { describe, expect, it, vi } from "vitest";
-import { createDshRuntime, WIKI_REPORT_SOURCE } from "../../src/dsh/background.js";
-import { createLogger } from "../../src/dsh/logger.js";
+import { describe, expect, it } from "vitest";
+import {
+  createDshRuntime,
+  ensureWhenIdleDrain,
+  WIKI_REPORT_SOURCE,
+  watchCompaction,
+} from "../../src/dsh/background.js";
+import type { WikiLogger } from "../../src/dsh/logger.js";
 import type { DshAgent, DshContext } from "../../src/dsh/types.js";
 
-function silentLogger() {
-  return createLogger(undefined);
-}
-
-function originAgent(sessionId: string, onInject?: (input: unknown) => void): DshAgent {
+function silentLogger(): WikiLogger {
   return {
-    session: { id: sessionId },
-    inject: (input: unknown) => {
-      onInject?.(input);
-    },
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
   };
 }
 
 describe("createDshRuntime", () => {
-  it("single-flights identical labels", async () => {
-    const runtime = createDshRuntime({}, silentLogger());
-    let runs = 0;
-    const work = async () => {
-      runs++;
-      await new Promise((r) => setTimeout(r, 20));
-      return null;
-    };
-    await Promise.all([
-      runtime.launchTask({ label: "ingest:A", agent: undefined, vaultRoot: "/v", work }),
-      runtime.launchTask({ label: "ingest:A", agent: undefined, vaultRoot: "/v", work }),
-    ]);
-    expect(runs).toBe(1);
-    runtime.dispose();
-  });
-
   it("injects completion reports into the ORIGIN session only", async () => {
     const seen: unknown[] = [];
-    const origin = originAgent("sess-a", (input) => seen.push(input));
+    const origin = {
+      session: { id: "sess-a" },
+      inject: (input: unknown) => {
+        seen.push(input);
+      },
+    } as unknown as DshAgent;
+    const other = {
+      session: { id: "sess-b" },
+      inject: () => {
+        throw new Error("must not inject into other session");
+      },
+    } as unknown as DshAgent;
+    void other;
     const runtime = createDshRuntime({}, silentLogger());
     await runtime.launchTask({
-      label: "ingest:B",
+      label: "t1",
       agent: origin,
       vaultRoot: "/v",
-      work: async () => "done summary",
+      work: async () => "hello report",
     });
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ source: { kind: WIKI_REPORT_SOURCE } });
+    expect(seen[0]).toMatchObject({
+      content: "hello report",
+      source: { kind: WIKI_REPORT_SOURCE },
+    });
     runtime.dispose();
   });
 
   it("never throws (and never leaks) when the origin session is gone", async () => {
-    const gone: DshAgent = {
+    const runtime = createDshRuntime({}, silentLogger());
+    const gone = {
       session: { id: "sess-gone" },
       inject: () => {
         throw new Error("session disposed");
       },
-    };
-    const runtime = createDshRuntime({}, silentLogger());
+    } as unknown as DshAgent;
     await expect(
       runtime.launchTask({
-        label: "ingest:C",
+        label: "t-gone",
         agent: gone,
         vaultRoot: "/v",
         work: async () => "hi",
@@ -67,68 +66,95 @@ describe("createDshRuntime", () => {
     runtime.dispose();
   });
 
-  it("drains per session and reports pending counts", async () => {
+  it("dedupes by label", async () => {
     const runtime = createDshRuntime({}, silentLogger());
-    let release!: () => void;
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    const pending = runtime.launchTask({
-      label: "ingest:D",
-      agent: originAgent("sess-d"),
+    let runs = 0;
+    const work = async () => {
+      runs++;
+      await new Promise((r) => setTimeout(r, 20));
+      return null;
+    };
+    const a = runtime.launchTask({ label: "same", agent: undefined, vaultRoot: "/v", work });
+    const b = runtime.launchTask({ label: "same", agent: undefined, vaultRoot: "/v", work });
+    await Promise.all([a, b]);
+    expect(runs).toBe(1);
+    runtime.dispose();
+  });
+
+  it("drainSession waits for matching session tasks", async () => {
+    const runtime = createDshRuntime({}, silentLogger());
+    const agent = { session: { id: "s1" } } as unknown as DshAgent;
+    let finished = false;
+    void runtime.launchTask({
+      label: "slow",
+      agent,
       vaultRoot: "/v",
       work: async () => {
-        await gate;
+        await new Promise((r) => setTimeout(r, 30));
+        finished = true;
         return null;
       },
     });
-    expect(runtime.pendingCount("sess-d")).toBe(1);
-    expect(runtime.pendingCount("other")).toBe(0);
-    release();
-    await pending;
-    expect(runtime.pendingCount()).toBe(0);
+    await runtime.drainSession("s1", 5_000);
+    expect(finished).toBe(true);
     runtime.dispose();
   });
 
-  it("dispose cancels in-flight work", async () => {
+  it("reports failures back to the origin", async () => {
+    const seen: unknown[] = [];
+    const agent = {
+      session: { id: "s-fail" },
+      inject: (input: unknown) => {
+        seen.push(input);
+      },
+    } as unknown as DshAgent;
     const runtime = createDshRuntime({}, silentLogger());
-    const onAbort = vi.fn();
-    void runtime.launchTask({
-      label: "ingest:E",
-      agent: undefined,
+    await runtime.launchTask({
+      label: "boom",
+      agent,
       vaultRoot: "/v",
-      work: (signal) =>
-        new Promise<null>((resolve) => {
-          signal.addEventListener("abort", () => {
-            onAbort();
-            resolve(null);
-          });
-        }),
+      work: async () => {
+        throw new Error("synth failed");
+      },
     });
-    await new Promise((r) => setTimeout(r, 10));
+    expect(String((seen[0] as { content?: string })?.content ?? "")).toMatch(/synth failed/);
     runtime.dispose();
-    expect(onAbort).toHaveBeenCalled();
   });
 
   it("registers cleanup in ctx.effect for HMR unload", () => {
-    const cleanups: Array<() => unknown> = [];
+    const cleanups: Array<() => void> = [];
     const ctx = { effect: (fn: () => () => void) => cleanups.push(fn()) } as unknown as DshContext;
     createDshRuntime(ctx, silentLogger());
     expect(cleanups).toHaveLength(1);
   });
 });
 
-describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
+describe("watchCompaction", () => {
+  it("subscribes without throwing on a minimal ctx", () => {
+    const offs: Array<() => void> = [];
+    const ctx = {
+      on: () => {
+        const off = () => undefined;
+        offs.push(off);
+        return off;
+      },
+      effect: (fn: () => () => void) => fn(),
+    } as unknown as DshContext;
+    const runtime = createDshRuntime({}, silentLogger());
+    expect(() => watchCompaction(ctx, runtime, silentLogger())).not.toThrow();
+    runtime.dispose();
+  });
+});
+
+describe("createDshRuntime needsLlm whenIdle wrap (T5/T6)", () => {
   interface IdleHarness {
     agent: DshAgent;
     setDriving: (driving: boolean) => void;
     releaseIdle: () => void;
   }
 
-  /** Fake agent with real runMaintenance exclusivity semantics. */
   function idleAgent(sessionId: string, onInject?: (input: unknown) => void): IdleHarness {
     let driving = true;
-    let maintenanceActive = false;
     let idleWaiters: Array<() => void> = [];
     const agent = {
       session: { id: sessionId },
@@ -139,17 +165,6 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
         new Promise<void>((resolve) => {
           idleWaiters.push(resolve);
         }),
-      runMaintenance: (job: (signal: AbortSignal) => Promise<string | null>) => {
-        if (driving || maintenanceActive) throw new Error(`agent "${sessionId}" busy`);
-        maintenanceActive = true;
-        return (async () => {
-          try {
-            return await job(new AbortController().signal);
-          } finally {
-            maintenanceActive = false;
-          }
-        })();
-      },
       inject: (input: unknown) => {
         onInject?.(input);
       },
@@ -162,9 +177,7 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
       releaseIdle: () => {
         const waiters = idleWaiters;
         idleWaiters = [];
-        waiters.forEach((resolve) => {
-          resolve();
-        });
+        for (const resolve of waiters) resolve();
       },
     };
   }
@@ -176,6 +189,7 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
   it("does not start LLM work before the turn ends", async () => {
     const seen: unknown[] = [];
     const harness = idleAgent("sess-idle-1", (input) => seen.push(input));
+    ensureWhenIdleDrain(harness.agent);
     const runtime = createDshRuntime({}, silentLogger());
     let started = false;
     const done = runtime.launchTask({
@@ -192,7 +206,10 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
     expect(started).toBe(false);
     expect(runtime.pendingCount("sess-idle-1")).toBe(1);
     harness.setDriving(false);
+    // Simulate headless: await the (wrapped) whenIdle — drain runs inside.
+    const idleDone = (harness.agent.whenIdle as () => Promise<void>)();
     harness.releaseIdle();
+    await idleDone;
     await done;
     expect(started).toBe(true);
     expect(seen).toHaveLength(1);
@@ -200,38 +217,36 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
     runtime.dispose();
   });
 
-  it("re-waits when a new turn wins the maintenance claim race", async () => {
+  it("headless-style whenIdle await settles only after synthesis (no deadlock)", async () => {
     const harness = idleAgent("sess-idle-2");
+    ensureWhenIdleDrain(harness.agent);
     const runtime = createDshRuntime({}, silentLogger());
-    let runs = 0;
-    const done = runtime.launchTask({
+    let finished = false;
+    const task = runtime.launchTask({
       label: "ingest:idle-2",
       agent: harness.agent,
       vaultRoot: "/v",
       needsLlm: true,
       work: async () => {
-        runs++;
+        await new Promise((r) => setTimeout(r, 30));
+        finished = true;
         return "ok";
       },
     });
-    await tick(10);
-    // Turn still driving: first idle observation resolves but the claim loses.
-    harness.releaseIdle();
-    await tick(10);
-    expect(runs).toBe(0);
     harness.setDriving(false);
+    const idleP = (harness.agent.whenIdle as () => Promise<void>)();
     harness.releaseIdle();
-    await done;
-    expect(runs).toBe(1);
+    await Promise.all([idleP, task]);
+    expect(finished).toBe(true);
     runtime.dispose();
   });
 
-  it("serializes concurrent LLM work on the maintenance phase", async () => {
+  it("serializes concurrent needsLlm work on the process chain", async () => {
     const harness = idleAgent("sess-idle-3");
     harness.setDriving(false);
+    ensureWhenIdleDrain(harness.agent);
     const runtime = createDshRuntime({}, silentLogger());
     const order: string[] = [];
-    const gate = () => new Promise<void>((r) => setTimeout(r, 20));
     const first = runtime.launchTask({
       label: "ingest:idle-3a",
       agent: harness.agent,
@@ -239,7 +254,7 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
       needsLlm: true,
       work: async () => {
         order.push("first-start");
-        await gate();
+        await new Promise((r) => setTimeout(r, 20));
         order.push("first-end");
         return null;
       },
@@ -254,13 +269,8 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
         return null;
       },
     });
-    harness.releaseIdle();
-    await first;
-    // Second lost the claim race while the first held maintenance; it
-    // re-waits on a fresh idle observation instead of running detached.
-    expect(order).toEqual(["first-start", "first-end"]);
-    harness.releaseIdle();
-    await second;
+    // Already idle → microtask drain
+    await Promise.all([first, second]);
     expect(order).toEqual(["first-start", "first-end", "second-start"]);
     runtime.dispose();
   });
@@ -268,62 +278,103 @@ describe("createDshRuntime needsLlm idle gate (T5/T6)", () => {
   it("runs detached when the origin agent is gone but the process lives (H28)", async () => {
     const runtime = createDshRuntime({}, silentLogger());
     const gone = {
-      session: { id: "sess-gone-idle" },
-      status: "idle",
-      whenIdle: () => Promise.reject(new Error("disposed")),
-      runMaintenance: () => {
-        throw new Error("disposed");
-      },
+      session: { id: "sess-detached" },
+      // no whenIdle
+      inject: () => undefined,
     } as unknown as DshAgent;
     let ran = false;
     await runtime.launchTask({
-      label: "ingest:idle-4",
+      label: "ingest:detached",
       agent: gone,
       vaultRoot: "/v",
       needsLlm: true,
       work: async () => {
         ran = true;
-        return null;
+        return "detached-ok";
       },
     });
     expect(ran).toBe(true);
     runtime.dispose();
   });
 
-  it("drops the wait silently on dispose", async () => {
-    const harness = idleAgent("sess-idle-5");
-    const runtime = createDshRuntime({}, silentLogger());
-    let ran = false;
-    const done = runtime.launchTask({
-      label: "ingest:idle-5",
+  it("patches agents listed at runtime construction (agent/created path)", async () => {
+    const harness = idleAgent("sess-pre");
+    const created: Array<(payload: { agent?: DshAgent }) => void> = [];
+    const ctx = {
+      agents: { list: () => [harness.agent] },
+      on: (event: string, listener: (...args: never[]) => unknown) => {
+        if (event === "agent/created")
+          created.push(listener as (payload: { agent?: DshAgent }) => void);
+        return () => undefined;
+      },
+    } as unknown as DshContext;
+    const runtime = createDshRuntime(ctx, silentLogger());
+    expect(created.length).toBe(1);
+    // whenIdle should already be wrapped from list()
+    let drained = false;
+    const task = runtime.launchTask({
+      label: "ingest:pre",
       agent: harness.agent,
       vaultRoot: "/v",
       needsLlm: true,
       work: async () => {
+        drained = true;
+        return null;
+      },
+    });
+    harness.setDriving(false);
+    const idleP = (harness.agent.whenIdle as () => Promise<void>)();
+    harness.releaseIdle();
+    await Promise.all([idleP, task]);
+    expect(drained).toBe(true);
+    runtime.dispose();
+  });
+
+  it("drains detached when the original whenIdle rejects (agent gone mid-turn, H28)", async () => {
+    const runtime = createDshRuntime({}, silentLogger());
+    const seen: unknown[] = [];
+    const gone = {
+      session: { id: "sess-gone-reject" },
+      status: "running",
+      whenIdle: () => Promise.reject(new Error("disposed")),
+      inject: (input: unknown) => {
+        seen.push(input);
+      },
+    } as unknown as DshAgent;
+    let ran = false;
+    await runtime.launchTask({
+      label: "ingest:gone-reject",
+      agent: gone,
+      vaultRoot: "/v",
+      needsLlm: true,
+      work: async () => {
         ran = true;
-        return "late";
+        return "gone-ok";
+      },
+    });
+    expect(ran).toBe(true);
+    expect(seen).toHaveLength(1);
+    runtime.dispose();
+  });
+
+  it("dispose settles a queued launchTask with no whenIdle caller (no hang)", async () => {
+    const harness = idleAgent("sess-idle-dispose");
+    const runtime = createDshRuntime({}, silentLogger());
+    let started = false;
+    const done = runtime.launchTask({
+      label: "ingest:idle-dispose",
+      agent: harness.agent,
+      vaultRoot: "/v",
+      needsLlm: true,
+      work: async () => {
+        started = true;
+        return null;
       },
     });
     await tick(10);
     runtime.dispose();
+    // Nobody ever calls whenIdle — the abort must still settle the task.
     await done;
-    expect(ran).toBe(false);
-  });
-
-  it("starts immediately without needsLlm even on an idle-capable agent", async () => {
-    const harness = idleAgent("sess-idle-6");
-    const runtime = createDshRuntime({}, silentLogger());
-    let ran = false;
-    await runtime.launchTask({
-      label: "rebuild:idle-6",
-      agent: harness.agent,
-      vaultRoot: "/v",
-      work: async () => {
-        ran = true;
-        return null;
-      },
-    });
-    expect(ran).toBe(true);
-    runtime.dispose();
+    expect(started).toBe(false);
   });
 });

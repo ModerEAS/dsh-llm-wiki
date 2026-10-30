@@ -41,7 +41,7 @@ import { configForVault } from "./vault-state.js";
 export const PLUGIN_ID = "llm-wiki";
 
 /** Core services every profile must compose; the rest is defensive-optional. */
-export const inject = ["tools", "agents", "systemPrompt"];
+export const inject = ["tools", "agents", "systemPrompt", "subagents", "llm"];
 
 /** Row-config schema (validated at activation; see settings-ui.ts). */
 export const Config = WikiConfigSchema;

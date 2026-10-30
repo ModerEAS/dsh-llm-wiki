@@ -4,7 +4,7 @@ import { WIKI_STATUS_BLOCK } from "../../extensions/llm-wiki/lib/inject.js";
 import { defaultPolicy } from "../../src/dsh/approval.js";
 import { runCommand } from "../../src/dsh/exec.js";
 import { isMainSession } from "../../src/dsh/recall-inject.js";
-import { synthesize } from "../../src/dsh/synthesis.js";
+import { synthesize, toDshOutputSchema } from "../../src/dsh/synthesis.js";
 
 describe("runCommand (self-managed timeout, H09)", () => {
   it("rejects hung commands after the plugin-owned deadline", async () => {
@@ -109,5 +109,27 @@ describe("detectHost (dsh branch, H33)", () => {
       if (prevProfile === undefined) delete process.env.DSH_PROFILE;
       else process.env.DSH_PROFILE = prevProfile;
     }
+  });
+});
+
+describe("toDshOutputSchema", () => {
+  it("strips minLength and other unsupported keywords", () => {
+    const raw = {
+      type: "object",
+      properties: {
+        summary: { type: "string", minLength: 1, description: "x" },
+        items: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+      },
+      required: ["summary"],
+    };
+    const out = toDshOutputSchema(raw);
+    expect(out).toEqual({
+      type: "object",
+      properties: {
+        summary: { type: "string", description: "x" },
+        items: { type: "array", items: { type: "string" } },
+      },
+      required: ["summary"],
+    });
   });
 });

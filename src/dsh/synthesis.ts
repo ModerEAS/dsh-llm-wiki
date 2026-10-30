@@ -12,12 +12,14 @@
  *    (`SYNTHESIS_PRESET_ID`) whose toolset is pinned to reader tools plus
  *    the commit tool the child uses to hand back structured pages. The main
  *    session's standard preset never gains the commit tool, so the primary
- *    agent cannot misfire it (H13).
- * 2. Fallback: a minimal single-shot `ctx.llm.stream` call with capability
- *    downgrade — reasoning effort picked via `prepareCall` when available,
- *    otherwise dropped a tier with a log line (H23). A failed synthesis is
- *    ALWAYS surfaced as an error; the lane never silently degrades to
- *    "please write the pages by hand".
+ *    agent cannot misfire it (H13). If that preset is not registered yet,
+ *    we retry without `agentPreset` (JSON `outputSchema` handoff still works
+ *    for ingest — the prompt forbids calling commit tools).
+ * 2. Fallback: a minimal single-shot `ctx.llm.stream` call with an explicit
+ *    provider/model (from the request override or the parent agent options).
+ *    `prepareCall` is awaited; floating rejections must not become fatal
+ *    fiber crashes. A failed synthesis is ALWAYS surfaced as an error; the
+ *    lane never silently degrades to "please write the pages by hand".
  */
 
 import type { WikiLogger } from "./logger.js";
@@ -38,6 +40,42 @@ export const SYNTHESIS_PRESET_TOOLS = [
   "wiki_ensure_page",
   "wiki_commit_synthesis",
 ] as const;
+
+/** DSH structured-output subset rejects keywords like minLength. Strip them. */
+const DSH_SCHEMA_STRIP = new Set([
+  "minLength",
+  "maxLength",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "pattern",
+  "format",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minProperties",
+  "maxProperties",
+  "default",
+  "examples",
+  "$schema",
+  "$id",
+]);
+
+export function toDshOutputSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(walk);
+    if (!value || typeof value !== "object") return value;
+    const out: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (DSH_SCHEMA_STRIP.has(key)) continue;
+      out[key] = walk(child);
+    }
+    return out;
+  };
+  return walk(schema) as Record<string, unknown>;
+}
+
 
 export interface SynthesisRequest {
   prompt: string;
@@ -62,35 +100,58 @@ function blocksToText(output: Array<{ type?: string; text?: string }> | undefine
     .join("");
 }
 
+function resolveRoute(
+  parent: DshAgent | undefined,
+  req: SynthesisRequest,
+): { provider?: string; model?: string } {
+  const fromReq = req.agentOptions;
+  if (fromReq?.provider && fromReq?.model) {
+    return { provider: fromReq.provider, model: fromReq.model };
+  }
+  const options = (parent as { options?: { provider?: string; model?: string } } | undefined)?.options;
+  if (options?.provider && options?.model) {
+    return { provider: options.provider, model: options.model };
+  }
+  return {
+    provider: fromReq?.provider ?? options?.provider,
+    model: fromReq?.model ?? options?.model,
+  };
+}
+
 async function synthesizeViaSubagent(
   ctx: DshContext,
   parent: DshAgent,
   req: SynthesisRequest,
   logger?: WikiLogger,
+  usePreset = true,
 ): Promise<SynthesisResult> {
-  const startActivation = ctx.subagents?.startActivation;
-  if (typeof startActivation !== "function") throw new Error("ctx.subagents unavailable");
+  const subagents = ctx.subagents;
+  if (!subagents || typeof subagents.startActivation !== "function") {
+    throw new Error("ctx.subagents unavailable");
+  }
   const providers: string[] = (() => {
     try {
-      return ctx.subagents?.list?.() ?? [];
+      return subagents.list?.() ?? [];
     } catch {
       return [];
     }
   })();
   const provider = providers.includes("spawn") ? "spawn" : (providers[0] ?? "spawn");
-  const usePreset = provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
+  const preset = usePreset && provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
 
-  const receipt = await startActivation({
+  // Must call through the service object — extracting the method drops `this`
+  // and crashes inside expectProvider.
+  const receipt = await subagents.startActivation({
     provider,
     label: "llm-wiki synthesis",
     request: {
       parent,
       prompt: [{ type: "text", text: req.prompt }],
       ...(req.cwd ? { cwd: req.cwd } : {}),
-      ...(usePreset ? { agentPreset: usePreset } : {}),
+      ...(preset ? { agentPreset: preset } : {}),
       ...(req.outputSchema ? { outputSchema: req.outputSchema } : {}),
       ...(req.agentOptions ? { agentOptions: req.agentOptions } : {}),
-      maxDepth: req.maxDepth ?? 0,
+      maxDepth: req.maxDepth ?? 1,
     },
     signal: AbortSignal.timeout(req.timeoutMs ?? 10 * 60_000),
     delivery: "caller",
@@ -116,35 +177,54 @@ async function synthesizeViaSubagent(
 
 async function synthesizeViaLlmStream(
   ctx: DshContext,
+  parent: DshAgent | undefined,
   req: SynthesisRequest,
   logger?: WikiLogger,
 ): Promise<SynthesisResult> {
-  const stream = ctx.llm?.stream;
-  if (typeof stream !== "function") throw new Error("ctx.llm.stream unavailable");
-  // Capability downgrade (H23): try a prepared call first when the service
-  // offers it; otherwise stream with a modest, widely-supported shape and
-  // log that we stepped down instead of failing the whole synthesis.
+  const llm = ctx.llm;
+  if (!llm || typeof llm.stream !== "function") throw new Error("ctx.llm.stream unavailable");
+  const route = resolveRoute(parent, req);
+  if (!route.provider || !route.model) {
+    throw new Error("llm stream synthesis requires provider+model (parent.options or agentOptions)");
+  }
+
+  const signal = AbortSignal.timeout(req.timeoutMs ?? 10 * 60_000);
   const options: Record<string, unknown> = {
+    provider: route.provider,
+    model: route.model,
     messages: [{ role: "user", content: [{ type: "text", text: req.prompt }] }],
+    signal,
   };
+
+  // H23: prepareCall when available; must be awaited so rejections cannot
+  // escape as unhandled (fatal cordis fiber crashes).
   try {
-    const prepared = (
-      ctx.llm as {
-        prepareCall?: (config: unknown, signal: AbortSignal) => unknown;
+    const prepareCall = (
+      llm as {
+        prepareCall?: (config: unknown, signal?: AbortSignal) => Promise<unknown>;
       }
-    )?.prepareCall?.({ maxTokens: 4096 }, AbortSignal.timeout(10_000));
-    void prepared;
+    ).prepareCall;
+    if (typeof prepareCall === "function") {
+      const prepared = await prepareCall.call(
+        llm,
+        { provider: route.provider, model: route.model, maxTokens: 4096 },
+        AbortSignal.timeout(10_000),
+      );
+      if (prepared && typeof prepared === "object") {
+        Object.assign(options, prepared);
+        options.signal = signal;
+        options.messages = [{ role: "user", content: [{ type: "text", text: req.prompt }] }];
+      }
+    }
   } catch (error) {
     logger?.warn(
       `llm prepareCall unavailable, using default call shape: ${(error as Error).message}`,
     );
   }
-  const signal = AbortSignal.timeout(req.timeoutMs ?? 10 * 60_000);
+
   let text = "";
   let failure: string | undefined;
-  for await (const chunk of stream.call(ctx.llm, { ...options, signal }) as AsyncIterable<
-    Record<string, unknown>
-  >) {
+  for await (const chunk of llm.stream(options) as AsyncIterable<Record<string, unknown>>) {
     const kind = chunk.kind as string | undefined;
     if (kind === "text-delta" && typeof chunk.delta === "string") text += chunk.delta;
     else if (kind === "text" && typeof chunk.text === "string") text += chunk.text;
@@ -176,15 +256,25 @@ export async function synthesize(
 ): Promise<SynthesisResult> {
   const errors: string[] = [];
   if (parent && typeof ctx.subagents?.startActivation === "function") {
+    // note: call synthesizeViaSubagent which binds via ctx.subagents.startActivation
     try {
-      return await synthesizeViaSubagent(ctx, parent, req, logger);
+      return await synthesizeViaSubagent(ctx, parent, req, logger, true);
     } catch (error) {
-      errors.push(`subagent: ${(error as Error).message}`);
-      logger?.warn(`subagent synthesis failed, trying llm.stream: ${(error as Error).message}`);
+      const message = (error as Error).message;
+      errors.push(`subagent+preset: ${message}`);
+      logger?.warn(`subagent+preset failed, retrying without preset: ${message}`);
+      try {
+        return await synthesizeViaSubagent(ctx, parent, req, logger, false);
+      } catch (retryError) {
+        errors.push(`subagent: ${(retryError as Error).message}`);
+        logger?.warn(
+          `subagent synthesis failed, trying llm.stream: ${(retryError as Error).message}`,
+        );
+      }
     }
   }
   try {
-    return await synthesizeViaLlmStream(ctx, req, logger);
+    return await synthesizeViaLlmStream(ctx, parent, req, logger);
   } catch (error) {
     errors.push(`llm-stream: ${(error as Error).message}`);
   }

@@ -92,7 +92,7 @@ import type { DshRuntime } from "./background.js";
 import { boundary, type PiStyleResult } from "./envelope.js";
 import { execRaw } from "./exec.js";
 import type { WikiLogger } from "./logger.js";
-import { synthesize } from "./synthesis.js";
+import { synthesize, toDshOutputSchema } from "./synthesis.js";
 import type { DshAgent, DshContext, WikiToolValue } from "./types.js";
 import { configForVault, withVaultWrite } from "./vault-state.js";
 
@@ -384,9 +384,9 @@ async function ingestOneSource(
     {
       prompt,
       cwd: paths.root,
-      outputSchema: JSON.parse(JSON.stringify(CommitSynthesisSchema)) as Record<string, unknown>,
+      outputSchema: toDshOutputSchema(JSON.parse(JSON.stringify(CommitSynthesisSchema)) as Record<string, unknown>),
       timeoutMs: 10 * 60_000,
-      maxDepth: 0,
+      maxDepth: 1,
       ...(modelOverride
         ? { agentOptions: { provider: modelOverride.provider, model: modelOverride.id } }
         : {}),
@@ -454,9 +454,8 @@ export async function runIngest(
           label: `ingest:${s.id}`,
           agent: deps.agent,
           vaultRoot: paths.root,
-          // Synthesis hits the model: wait for the turn to end first or the
-          // foreground turn dies with TRANSPORT (T5/T6). Runs as a
-          // maintenance task — no new turn, no wakeup.
+          // Synthesis hits the model: enqueue until wrapped whenIdle drains
+          // (mid-turn LLM → TRANSPORT; post-idle without wrap → headless exit race).
           needsLlm: true,
           work: async () => ingestOneSource(deps, paths, s, config, override ?? undefined),
         })
