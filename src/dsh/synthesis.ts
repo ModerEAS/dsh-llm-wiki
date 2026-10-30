@@ -137,8 +137,21 @@ async function synthesizeViaSubagent(
     }
   })();
   const provider = providers.includes("spawn") ? "spawn" : (providers[0] ?? "spawn");
-  // Preset path needs ctx.agentPresets; without it startActivation rejects the option.
-  const hasPresets = Boolean((ctx as { agentPresets?: unknown }).agentPresets);
+  // Preset path needs the agentPresets service. Access via soft get — reading
+  // ctx.agentPresets without inject throws on the cordis proxy.
+  const hasPresets = (() => {
+    try {
+      const soft = (ctx as { get?: (name: string) => unknown }).get?.("agentPresets");
+      if (soft) return true;
+    } catch {
+      /* ignore */
+    }
+    try {
+      return Boolean((ctx as { agentPresets?: unknown }).agentPresets);
+    } catch {
+      return false;
+    }
+  })();
   const preset =
     usePreset && hasPresets && provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
 
