@@ -11,10 +11,10 @@
  *   It deliberately imports no Harness Client packages.
  *
  * The client half follows the researched `configForms` + `whileServed` +
- * `slots.inject('settings.section', …)` pattern; it has NOT been verified
- * against a live Harness (no browser control in this environment) — see
- * docs/dsh.md §WebUI. The Host half degrades cleanly when the client
- * bundle is absent: every access below is defensive.
+ * `slots.inject('settings.section', …)` pattern. Live T1.2 showed Host
+ * Config fields MUST be `.volatile()` or `settings.describe` omits the
+ * namespace and whileServed never mounts the section — see DECISIONS A7.
+ * Host half degrades cleanly when the client bundle is absent.
  */
 
 import z from "@deepseek-ai/schemastery";
@@ -32,13 +32,16 @@ export const WIKI_NAMESPACE = "llm-wiki";
  * key already read by the lib; no existing key semantics change.
  */
 export const WikiConfigSchema = z.object({
-  autoRecall: z.boolean().default(true).description("Automatic per-turn wiki recall injection."),
-  notices: z.boolean().default(true).description("Surface wiki activity (recall hits, reminders, reports) in the UI."),
-  trajectories: z.boolean().default(false).description("Opt-in agent-trajectory memory (capture / distill / recall skills)."),
-  taskModel: z.string().description("Background synthesis model as 'provider/id'. Empty = session model."),
-  semanticWeight: z.number().default(0.5).description("Weight of the semantic signal in hybrid recall (0 = pure lexical)."),
-  recallLinksThreshold: z.number().default(50).description("Vault page count above which recall returns links-first."),
-  ambientPersonalVault: z.boolean().description("Let the personal vault fire ambient recall outside project vaults."),
+  // Every settings-editable field must be `.volatile()` — Host `settings.describe`
+  // drops namespaces with no volatile form, so whileServed(['llm-wiki']) never
+  // mounts the client settings.section (T1.2 live failure).
+  autoRecall: z.boolean().default(true).description("Automatic per-turn wiki recall injection.").volatile(),
+  notices: z.boolean().default(true).description("Surface wiki activity (recall hits, reminders, reports) in the UI.").volatile(),
+  trajectories: z.boolean().default(false).description("Opt-in agent-trajectory memory (capture / distill / recall skills).").volatile(),
+  taskModel: z.string().description("Background synthesis model as 'provider/id'. Empty = session model.").volatile(),
+  semanticWeight: z.number().default(0.5).description("Weight of the semantic signal in hybrid recall (0 = pure lexical).").volatile(),
+  recallLinksThreshold: z.number().default(50).description("Vault page count above which recall returns links-first.").volatile(),
+  ambientPersonalVault: z.boolean().description("Let the personal vault fire ambient recall outside project vaults.").volatile(),
 });
 
 /** Field list shared conceptually with the client section (kept in sync by hand). */
@@ -57,8 +60,24 @@ export const WIKI_SETTINGS_FIELDS = [
  * out of auto-generated forms; without the client bundle this is a no-op.
  */
 export function registerSettingsUi(ctx: DshContext, logger?: WikiLogger): () => void {
+  // Self-rendered settings.section: opt out of auto-generated schema pages.
+  // Must be an effect under inject(['settings']) so a late/replaced Settings
+  // service still picks the policy up (dsh-settings README).
   try {
-    ctx.settings?.configure?.({ auto: false }, ctx.fiber);
+    const inject = (ctx as { inject?: (deps: string[], fn: (c: DshContext) => void) => void }).inject;
+    if (typeof inject === "function") {
+      inject(["settings"], (settingsCtx) => {
+        settingsCtx.effect?.(
+          () => {
+            settingsCtx.settings?.configure?.({ auto: false }, ctx.fiber);
+            return () => undefined;
+          },
+          "llm-wiki settings auto:false",
+        );
+      });
+    } else {
+      ctx.settings?.configure?.({ auto: false }, ctx.fiber);
+    }
   } catch (error) {
     logger?.warn(`settings.configure failed: ${(error as Error).message}`);
   }

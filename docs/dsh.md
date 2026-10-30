@@ -49,7 +49,7 @@ semantics survive the "commands create no model message" rule.
 | Rebuild/config keyed by vault; registry serial write queue | `src/dsh/vault-state.ts` |
 | Trajectory v1: fold/surface, shape convert, `tool_call_count > 0` | `src/dsh/trajectory-dsh.ts` |
 | `console.warn` → `ctx.logger` | `src/dsh/logger.ts` |
-| Former TUI settings → WebUI section; other commands stay slash | `src/dsh/settings-ui.ts`, `dsh/client.js`, `src/dsh/commands.ts` |
+| Former TUI settings → WebUI section; other commands stay slash; Config fields `.volatile()` for describe/whileServed | `src/dsh/settings-ui.ts`, `dsh/client.js`, `src/dsh/commands.ts` |
 | Approval: allow-listed programs + directories, else deny | `src/dsh/approval.ts` |
 | Minimal `lib/**` patches (each marked `DSH-PATCH` with reason) | `lib/host.ts` (dsh host), `lib/utils.ts` (atomic `writeJson`), `lib/guardrails.ts` (pi-import-free) |
 
@@ -76,7 +76,8 @@ the following need a live DeepSeek Harness (`0.2.1-rc.3`, desktop profile):
 - [ ] After HMR reload, old sessions keep guard + recall (no bare sessions,
       no double registration).
 - [ ] Two sessions on different vaults never cross rebuilds/config.
-- [ ] Settings section renders (client bundle — assembled from the
-      researched `configForms` contract, not yet live-verified).
+- [ ] Settings section renders (Host `WikiConfigSchema` fields must be
+      `.volatile()` so `settings.describe` exposes `llm-wiki`; client
+      `configForms.whileServed` then mounts `settings.section`).
 - [ ] With an approval policy composed, wiki tools allow/deny as
       documented; subagent synthesis cannot escalate.

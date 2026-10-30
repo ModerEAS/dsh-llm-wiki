@@ -192,8 +192,16 @@ window.__ModuleLoader__.load({
               ctx.effect(() => ctx.locale.register(NS, STRINGS), "wiki-ui: dictionaries"),
             );
           }
-          const scope = ctx.configForms ? ctx.configForms.get(ENTRY) : null;
-          if (!scope || !ctx.configForms?.whileServed || !ctx.slots?.inject) return;
+          // configForms.get always returns a controller; do NOT early-return on
+          // a "missing" scope. whileServed mounts only when Host describe lists
+          // the llm-wiki namespace (requires volatile Config fields on Host).
+          if (!ctx.configForms?.whileServed || !ctx.slots?.inject || !ctx.slots?.register) {
+            try {
+              ctx.logger?.warn?.("[llm-wiki] settings UI skipped: configForms/slots unavailable");
+            } catch (_) {}
+            return () => {};
+          }
+          const scope = ctx.configForms.get(ENTRY);
           disposers.push(
             ctx.effect(
               () =>
