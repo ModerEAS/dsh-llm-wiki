@@ -221,3 +221,32 @@ describe("session cwd vs process.cwd (T2.3/D1)", () => {
     }
   });
 });
+
+describe("structured data envelope (T11.4/A5)", () => {
+  it("status/search/recall/lint each return structured data on a real vault", async () => {
+    const h = host();
+    const tools = buildWikiTools(h);
+    const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
+    const status = await byName.wiki_status.execute({}, { agent: { session: { id: "s" } } });
+    expect(status?.data).toMatchObject({ totalPages: expect.any(Number) });
+
+    // Empty query may throw or return empty — use a broad query that still yields data shape.
+    const search = await byName.wiki_search.execute(
+      { query: "T11" },
+      { agent: { session: { id: "s" } } },
+    );
+    expect(search?.text).toBeTypeOf("string");
+    expect(search?.data).toBeTruthy();
+
+    const recall = await byName.wiki_recall.execute(
+      { query: "T11 structured" },
+      { agent: { session: { id: "s" } } },
+    );
+    expect(recall?.text).toBeTypeOf("string");
+    expect(recall?.data).toBeTruthy();
+
+    const lint = await byName.wiki_lint.execute({}, { agent: { session: { id: "s" } } });
+    expect(lint?.text).toBeTypeOf("string");
+    expect(lint?.data).toBeTruthy();
+  });
+});
