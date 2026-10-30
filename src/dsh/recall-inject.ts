@@ -39,7 +39,7 @@ import { resolveProjectVaultRoot, resolveVaultPaths } from "../../extensions/llm
 import type { DshRuntime } from "./background.js";
 import type { WikiLogger } from "./logger.js";
 import type { DshAgent, DshContext, PreStepDecision } from "./types.js";
-import { configForVault, takePendingRebuild } from "./vault-state.js";
+import { configForVault, takePendingRebuild, withVaultWrite } from "./vault-state.js";
 
 /** Per-turn dedupe: at most one recall injection per (session, turn). */
 const injectedTurns = new Set<string>();
@@ -158,7 +158,10 @@ export function installPreStepListener(
       // a wiki edit earlier in this session rebuilds before recall runs.
       try {
         const paths = resolveVaultPaths(cwd);
-        if (takePendingRebuild(paths.root)) rebuildMetadataLight(paths);
+        if (takePendingRebuild(paths.root))
+          await withVaultWrite(paths.root, () => {
+            rebuildMetadataLight(paths);
+          });
       } catch (error) {
         logger?.warn(`pending rebuild failed: ${(error as Error).message}`);
       }

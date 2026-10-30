@@ -94,7 +94,7 @@ import { execRaw } from "./exec.js";
 import type { WikiLogger } from "./logger.js";
 import { synthesize } from "./synthesis.js";
 import type { DshAgent, DshContext, WikiToolValue } from "./types.js";
-import { configForVault } from "./vault-state.js";
+import { configForVault, withVaultWrite } from "./vault-state.js";
 
 export interface RunnerDeps {
   ctx: DshContext;
@@ -127,10 +127,11 @@ function scheduleLightRebuild(deps: RunnerDeps, paths: VaultPaths, label: string
       label: `${label}:${paths.root}`,
       agent: deps.agent,
       vaultRoot: paths.root,
-      work: async () => {
-        rebuildMetadataLight(paths);
-        return null;
-      },
+      work: async () =>
+        withVaultWrite(paths.root, () => {
+          rebuildMetadataLight(paths);
+          return null;
+        }),
     })
     .catch(() => undefined);
 }
@@ -405,7 +406,9 @@ async function ingestOneSource(
   if (!outcome.ok) {
     throw new Error(`commit failed for ${source.id}: ${outcome.diagnostics[0].message}`);
   }
-  rebuildMetadataLight(paths);
+  await withVaultWrite(paths.root, () => {
+    rebuildMetadataLight(paths);
+  });
   const wl = outcome.wikilinkDiagnostics?.length ?? 0;
   const wlNote = wl > 0 ? `, ${wl} wikilink issue${wl === 1 ? "" : "s"}` : "";
   return (
@@ -731,7 +734,7 @@ export async function runRebuildMeta(
   const paths = resolveVaultPaths(cwd);
   const check = vaultCheck(paths);
   if (!check.ok) fail(check.result);
-  const result = rebuildMetadata(paths);
+  const result = await withVaultWrite(paths.root, () => rebuildMetadata(paths));
   const count = Object.keys(result.registry?.pages ?? {}).length;
   deps.logger.info(`metadata rebuilt for ${paths.root}: ${count} pages`);
   return boundary({
@@ -878,7 +881,9 @@ export async function runLogEvent(
     });
   }
   appendEvent(paths, { kind, ...details });
-  rebuildMetadata(paths);
+  await withVaultWrite(paths.root, () => {
+    rebuildMetadata(paths);
+  });
   return boundary({
     content: [{ type: "text", text: `✅ Event logged: ${kind}` }],
     details: { kind },

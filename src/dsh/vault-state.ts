@@ -9,10 +9,11 @@
  * multi-session, so all of this state is keyed by vault root here.
  *
  * Registry writes go through one serial queue per vault root: `writeJson`
- * is an in-place `writeFileSync` (the "atomically" comment notwithstanding),
- * so concurrent rebuilds — e.g. after HMR, when two plugin generations are
- * briefly alive — can interleave and truncate `registry.json`. Serializing
- * per vault removes the corruption without a lockfile.
+ * is per-file tmp+rename (atomic), but a rebuild is a multi-file
+ * read-modify-write (registry/backlinks/index/log), so concurrent rebuilds
+ * — e.g. after HMR, when two plugin generations are briefly alive — can
+ * still interleave. Serializing per vault removes the corruption without
+ * a lockfile.
  */
 import type { TaskConfig } from "../../extensions/llm-wiki/lib/task-config.js";
 import { loadTaskConfig } from "../../extensions/llm-wiki/lib/task-config.js";
@@ -55,6 +56,8 @@ export function invalidateVaultConfig(vaultRoot: string): void {
 /**
  * Serial write queue per key (registry files, one writer per vault).
  * `write` may be sync or async; calls for the same key run strictly in order.
+ * Failures are swallowed for queue continuity — use `withVaultWrite` when
+ * the caller must observe the error.
  */
 export function createWriteQueue(): {
   enqueue: (key: string, write: () => void | Promise<void>) => Promise<void>;
@@ -89,4 +92,39 @@ export function createWriteQueue(): {
   }
 
   return { enqueue, pending: pendingCount };
+}
+
+/** Process-level queue singleton: every DSH metadata rebuild in this process
+ * funnels through one instance so same-vault writes serialize (H30). */
+const processQueue = createWriteQueue();
+
+/** Test seam: the singleton behind {@link withVaultWrite} (spy only). */
+export function getVaultWriteQueue(): {
+  enqueue: (key: string, write: () => void | Promise<void>) => Promise<void>;
+  pending: (key?: string) => number;
+} {
+  return processQueue;
+}
+
+/**
+ * Run `fn` serialized per vault root; propagates `fn`'s error to the caller
+ * (unlike `enqueue`, which swallows write errors to keep the chain alive).
+ */
+export async function withVaultWrite<T>(
+  vaultRoot: string,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  let result: T | undefined;
+  let failed = false;
+  let failure: unknown;
+  await processQueue.enqueue(vaultRoot, async () => {
+    try {
+      result = await fn();
+    } catch (error) {
+      failed = true;
+      failure = error;
+    }
+  });
+  if (failed) throw failure;
+  return result as T;
 }

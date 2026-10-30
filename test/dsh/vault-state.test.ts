@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   configForVault,
   createWriteQueue,
   flagPendingRebuild,
+  getVaultWriteQueue,
   invalidateVaultConfig,
   pendingRebuildCount,
   takePendingRebuild,
+  withVaultWrite,
 } from "../../src/dsh/vault-state.js";
 
 describe("pendingRebuild (per-vault, H04)", () => {
@@ -73,5 +75,76 @@ describe("createWriteQueue (single-writer per vault, H30)", () => {
     };
     await Promise.all([queue.enqueue("/v/a", work), queue.enqueue("/v/b", work)]);
     expect(maxConcurrent).toBe(2);
+  });
+});
+
+describe("withVaultWrite (process singleton, H30)", () => {
+  it("exposes a stable singleton for test spies", () => {
+    expect(getVaultWriteQueue()).toBe(getVaultWriteQueue());
+  });
+
+  it("serializes same-vault writes in order", async () => {
+    const order: string[] = [];
+    const root = `/with/${Date.now()}`;
+    await Promise.all([
+      withVaultWrite(root, async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("first");
+      }),
+      withVaultWrite(root, () => {
+        order.push("second");
+      }),
+    ]);
+    expect(order).toEqual(["first", "second"]);
+    expect(getVaultWriteQueue().pending()).toBe(0);
+  });
+
+  it("propagates fn errors but keeps the queue usable", async () => {
+    const root = `/with-err/${Date.now()}`;
+    await expect(
+      withVaultWrite(root, () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    const seen: string[] = [];
+    await withVaultWrite(root, () => {
+      seen.push("after");
+    });
+    expect(seen).toEqual(["after"]);
+  });
+
+  it("returns fn values (incl. async)", async () => {
+    const root = `/with-val/${Date.now()}`;
+    await expect(withVaultWrite(root, () => 42)).resolves.toBe(42);
+    await expect(withVaultWrite(root, async () => "ok")).resolves.toBe("ok");
+  });
+
+  it("runs different vaults concurrently", async () => {
+    const base = `/with-conc/${Date.now()}`;
+    let concurrent = 0;
+    let maxConcurrent = 0;
+    const work = async () => {
+      concurrent++;
+      maxConcurrent = Math.max(maxConcurrent, concurrent);
+      await new Promise((r) => setTimeout(r, 10));
+      concurrent--;
+    };
+    await Promise.all([
+      withVaultWrite(`${base}/a`, work),
+      withVaultWrite(`${base}/b`, work),
+    ]);
+    expect(maxConcurrent).toBe(2);
+  });
+
+  it("enqueue spy observes production-shaped rebuild traffic", async () => {
+    const queue = getVaultWriteQueue();
+    const spy = vi.spyOn(queue, "enqueue");
+    const root = `/with-spy/${Date.now()}`;
+    try {
+      await withVaultWrite(root, () => undefined);
+      expect(spy).toHaveBeenCalledWith(root, expect.any(Function));
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
