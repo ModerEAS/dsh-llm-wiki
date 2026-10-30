@@ -384,7 +384,9 @@ async function ingestOneSource(
     {
       prompt,
       cwd: paths.root,
-      outputSchema: toDshOutputSchema(JSON.parse(JSON.stringify(CommitSynthesisSchema)) as Record<string, unknown>),
+      outputSchema: toDshOutputSchema(
+        JSON.parse(JSON.stringify(CommitSynthesisSchema)) as Record<string, unknown>,
+      ),
       timeoutMs: 10 * 60_000,
       maxDepth: 1,
       ...(modelOverride
@@ -446,6 +448,27 @@ export async function runIngest(
   if (wantBackground) {
     const modelRaw = strArg(args, "model");
     const override = modelRaw ? parseModelRef(modelRaw) : undefined;
+    // T5.3/H28: snapshot the llm route SYNCHRONOUSLY at dispatch while the
+    // origin is still alive. Precedence: per-call override > vault taskModel
+    // > live parent.options. The snapshot travels inside the work closure as
+    // agentOptions so the detached llm.stream fallback still has a route
+    // after the origin is archived/disposed mid-synthesis.
+    const dispatchParentOptions = (() => {
+      try {
+        return (deps.agent as unknown as { options?: { provider?: string; model?: string } })
+          ?.options;
+      } catch {
+        return undefined;
+      }
+    })();
+    const launchRoute: { provider: string; id: string } | undefined = (() => {
+      if (override) return override;
+      if (config.taskModel) return { provider: config.taskModel.provider, id: config.taskModel.id };
+      if (dispatchParentOptions?.provider && dispatchParentOptions?.model) {
+        return { provider: dispatchParentOptions.provider, id: dispatchParentOptions.model };
+      }
+      return undefined;
+    })();
     for (const source of batch) {
       const manifest = source.manifest;
       const s = { id: source.id, extracted: source.extracted, manifest };
@@ -457,7 +480,7 @@ export async function runIngest(
           // Synthesis hits the model: enqueue until wrapped whenIdle drains
           // (mid-turn LLM → TRANSPORT; post-idle without wrap → headless exit race).
           needsLlm: true,
-          work: async () => ingestOneSource(deps, paths, s, config, override ?? undefined),
+          work: async () => ingestOneSource(deps, paths, s, config, launchRoute ?? undefined),
         })
         .catch(() => undefined);
     }

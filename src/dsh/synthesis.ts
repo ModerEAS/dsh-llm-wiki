@@ -76,7 +76,6 @@ export function toDshOutputSchema(schema: Record<string, unknown>): Record<strin
   return walk(schema) as Record<string, unknown>;
 }
 
-
 export interface SynthesisRequest {
   prompt: string;
   cwd?: string;
@@ -85,6 +84,15 @@ export interface SynthesisRequest {
   maxDepth?: number;
   /** Per-call model override as `{ provider, model }` (issue #69 lane). */
   agentOptions?: { provider?: string; model?: string };
+  /**
+   * Detached background synthesis (T5.3/H28): skip the parent-bound
+   * subagent lane entirely and use `ctx.llm.stream` directly. A subagent
+   * child is disposed with its parent (`drainDescendants`), so archiving
+   * the origin chat mid-synthesis aborts it; `llm.stream` runs in the
+   * plugin fiber and survives. Callers should set this when the parent is
+   * already known-gone at drain time.
+   */
+  detached?: boolean;
 }
 
 export interface SynthesisResult {
@@ -100,6 +108,46 @@ function blocksToText(output: Array<{ type?: string; text?: string }> | undefine
     .join("");
 }
 
+/**
+ * True when a subagent failure means the parent is gone (archive/stop):
+ * retrying another parent-bound child would abort the same way — fall
+ * straight through to the detached `llm.stream` lane.
+ */
+export function isParentGoneError(message: string): boolean {
+  return /abort|dispos|parent.*unavailable|exact live parent|UNAUTHORIZED|ACTIVATION_CLOSING|was stopped|closing/i.test(
+    message,
+  );
+}
+
+/**
+ * Capture the llm route synchronously while the origin is still alive
+ * (T5.3/H28). Callers launching background work must snapshot at dispatch
+ * time — reading `parent.options` after an await risks a disposed parent
+ * whose options are gone, leaving the `llm.stream` fallback with no route.
+ */
+export function snapshotLlmRoute(
+  parent: DshAgent | undefined,
+  req: SynthesisRequest,
+): { provider?: string; model?: string } {
+  return resolveRoute(parent, req);
+}
+
+/** Live-parent check via the agents registry when available. Defensive:
+ * missing service means "unknown", not "gone" — callers still try the
+ * subagent lane and rely on the abort fallback. */
+export function isParentLive(ctx: DshContext, parent: DshAgent | undefined): boolean {
+  if (!parent) return false;
+  try {
+    const get = ctx.agents?.get;
+    if (typeof get !== "function") return true;
+    const sessionId = parent.session?.id;
+    if (!sessionId) return true;
+    return get.call(ctx.agents, sessionId) === parent;
+  } catch {
+    return true;
+  }
+}
+
 function resolveRoute(
   parent: DshAgent | undefined,
   req: SynthesisRequest,
@@ -108,7 +156,8 @@ function resolveRoute(
   if (fromReq?.provider && fromReq?.model) {
     return { provider: fromReq.provider, model: fromReq.model };
   }
-  const options = (parent as { options?: { provider?: string; model?: string } } | undefined)?.options;
+  const options = (parent as { options?: { provider?: string; model?: string } } | undefined)
+    ?.options;
   if (options?.provider && options?.model) {
     return { provider: options.provider, model: options.model };
   }
@@ -152,8 +201,7 @@ async function synthesizeViaSubagent(
       return false;
     }
   })();
-  const preset =
-    usePreset && hasPresets && provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
+  const preset = usePreset && hasPresets && provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
 
   // Must call through the service object — extracting the method drops `this`
   // and crashes inside expectProvider.
@@ -201,14 +249,25 @@ async function synthesizeViaLlmStream(
   if (!llm || typeof llm.stream !== "function") throw new Error("ctx.llm.stream unavailable");
   const route = resolveRoute(parent, req);
   if (!route.provider || !route.model) {
-    throw new Error("llm stream synthesis requires provider+model (parent.options or agentOptions)");
+    throw new Error(
+      "llm stream synthesis requires provider+model (parent.options or agentOptions)",
+    );
   }
 
   const signal = AbortSignal.timeout(req.timeoutMs ?? 10 * 60_000);
+  // T5.3 live: the stream lane has no outputSchema enforcement (unlike the
+  // subagent lane), so the schema must travel IN the prompt or the model
+  // returns prose with no parseable JSON (live stream-only probe failed this
+  // way). Keep the original prompt intact; append the schema as a strict
+  // JSON-only instruction.
+  const effectivePrompt =
+    req.outputSchema && !req.prompt.includes("JSON Schema")
+      ? `${req.prompt}\n\nRespond with a single JSON object matching this JSON Schema (no markdown fences, no commentary, no tool calls):\n${JSON.stringify(req.outputSchema)}`
+      : req.prompt;
   const options: Record<string, unknown> = {
     provider: route.provider,
     model: route.model,
-    messages: [{ role: "user", content: [{ type: "text", text: req.prompt }] }],
+    messages: [{ role: "user", content: [{ type: "text", text: effectivePrompt }] }],
     signal,
   };
 
@@ -229,7 +288,7 @@ async function synthesizeViaLlmStream(
       if (prepared && typeof prepared === "object") {
         Object.assign(options, prepared);
         options.signal = signal;
-        options.messages = [{ role: "user", content: [{ type: "text", text: req.prompt }] }];
+        options.messages = [{ role: "user", content: [{ type: "text", text: effectivePrompt }] }];
       }
     }
   } catch (error) {
@@ -241,14 +300,40 @@ async function synthesizeViaLlmStream(
   let text = "";
   let failure: string | undefined;
   for await (const chunk of llm.stream(options) as AsyncIterable<Record<string, unknown>>) {
-    const kind = chunk.kind as string | undefined;
-    if (kind === "text-delta" && typeof chunk.delta === "string") text += chunk.delta;
-    else if (kind === "text" && typeof chunk.text === "string") text += chunk.text;
-    else if (kind === "error" || kind === "aborted") {
+    // T5.3 live fix: the real host yields `{ type, text }` (e.g.
+    // `{ type: "text-delta", text }`, `{ type: "block-end", block }) while
+    // unit fakes historically used `{ kind, delta }`. Accept both, or the
+    // detached fallback silently collects nothing ("returned no text")
+    // exactly as seen in the 2026-10-30 WebUI archive run.
+    const kind = (chunk.type ?? chunk.kind) as string | undefined;
+    if (kind === "text-delta" || kind === "text") {
+      const delta = chunk.delta ?? chunk.text;
+      if (typeof delta === "string") text += delta;
+    } else if (kind === "block-end") {
+      // Host sends deltas AND a closing block-end with the full text.
+      // Appending both duplicates the JSON (live: two concatenated objects
+      // → unparseable). Deltas already carry the content; only use
+      // block-end as a fallback when no delta arrived (non-delta protocol).
+      if (!text) {
+        const block = chunk.block as { type?: string; text?: string } | undefined;
+        if (block?.type === "text" && typeof block.text === "string") text += block.text;
+      }
+    } else if (kind === "error" || kind === "aborted") {
       const record = chunk.failure as { code?: string; message?: string } | undefined;
       failure = record?.message ?? record?.code ?? kind;
       break;
-    } else if (kind === "finish") break;
+    } else if (kind === "finish") {
+      // Host terminal: `{ type: "finish", reason: { kind } }`. An
+      // error/aborted finish must fail, a clean stop just ends.
+      const reason = chunk.reason as { kind?: string } | undefined;
+      const record = chunk.failure as { code?: string; message?: string } | undefined;
+      if (reason?.kind === "error" || reason?.kind === "aborted") {
+        failure = record?.message ?? record?.code ?? reason.kind;
+      } else if (record?.message ?? record?.code) {
+        failure = record?.message ?? record?.code;
+      }
+      break;
+    }
     if (signal.aborted) {
       failure = "aborted";
       break;
@@ -263,6 +348,14 @@ async function synthesizeViaLlmStream(
  * Synthesize wiki content. Subagent lane first (structured handoff via the
  * synthesis preset), `ctx.llm.stream` as fallback. Failures throw — callers
  * must surface them, never silently substitute a hand-written checklist.
+ *
+ * T5.3/H28 survival: the route is snapshotted synchronously at entry (before
+ * any await) so the `llm.stream` fallback still has provider/model even when
+ * the parent is archived/disposed mid-flight. A parent-gone abort skips the
+ * second parent-bound retry and falls straight through to the detached
+ * stream lane, which runs in the plugin fiber and is not disposed with the
+ * origin session. `detached: true` (or a registry-confirmed gone parent)
+ * skips the subagent lane entirely.
  */
 export async function synthesize(
   ctx: DshContext,
@@ -271,26 +364,48 @@ export async function synthesize(
   logger?: WikiLogger,
 ): Promise<SynthesisResult> {
   const errors: string[] = [];
-  if (parent && typeof ctx.subagents?.startActivation === "function") {
+  // Snapshot BEFORE any await: after archive, parent.options may be gone.
+  const snapshot = snapshotLlmRoute(parent, req);
+  const hasSnapshotRoute = Boolean(snapshot.provider && snapshot.model);
+  const fallbackReq: SynthesisRequest =
+    hasSnapshotRoute && !(req.agentOptions?.provider && req.agentOptions?.model)
+      ? { ...req, agentOptions: { provider: snapshot.provider, model: snapshot.model } }
+      : req;
+  const detached = req.detached === true;
+  const parentGoneAtEntry = parent ? !isParentLive(ctx, parent) : true;
+  if (
+    parent &&
+    !detached &&
+    !parentGoneAtEntry &&
+    typeof ctx.subagents?.startActivation === "function"
+  ) {
     // note: call synthesizeViaSubagent which binds via ctx.subagents.startActivation
     try {
       return await synthesizeViaSubagent(ctx, parent, req, logger, true);
     } catch (error) {
       const message = (error as Error).message;
       errors.push(`subagent+preset: ${message}`);
-      logger?.warn(`subagent+preset failed, retrying without preset: ${message}`);
-      try {
-        return await synthesizeViaSubagent(ctx, parent, req, logger, false);
-      } catch (retryError) {
-        errors.push(`subagent: ${(retryError as Error).message}`);
-        logger?.warn(
-          `subagent synthesis failed, trying llm.stream: ${(retryError as Error).message}`,
-        );
+      if (isParentGoneError(message)) {
+        logger?.warn(`subagent parent gone (${message}), falling through to detached llm.stream`);
+      } else {
+        logger?.warn(`subagent+preset failed, retrying without preset: ${message}`);
+        try {
+          return await synthesizeViaSubagent(ctx, parent, req, logger, false);
+        } catch (retryError) {
+          errors.push(`subagent: ${(retryError as Error).message}`);
+          logger?.warn(
+            `subagent synthesis failed, trying llm.stream: ${(retryError as Error).message}`,
+          );
+        }
       }
     }
+  } else if (parent && (detached || parentGoneAtEntry)) {
+    logger?.warn(
+      `synthesis detached lane (detached=${detached}, parentGone=${parentGoneAtEntry}): skipping parent-bound subagent`,
+    );
   }
   try {
-    return await synthesizeViaLlmStream(ctx, parent, req, logger);
+    return await synthesizeViaLlmStream(ctx, parent, fallbackReq, logger);
   } catch (error) {
     errors.push(`llm-stream: ${(error as Error).message}`);
   }
