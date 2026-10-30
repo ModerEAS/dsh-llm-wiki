@@ -377,4 +377,49 @@ describe("createDshRuntime needsLlm whenIdle wrap (T5/T6)", () => {
     await done;
     expect(started).toBe(false);
   });
+  it("keeps needsLlm work running after origin inject is gone (T5.3/H28)", async () => {
+    const logs: string[] = [];
+    const logger: WikiLogger = {
+      info: (m: string) => logs.push(`i:${m}`),
+      warn: (m: string) => logs.push(`w:${m}`),
+      error: (m: string) => logs.push(`e:${m}`),
+    };
+    const harness = idleAgent("sess-t53");
+    ensureWhenIdleDrain(harness.agent);
+    const runtime = createDshRuntime({}, logger);
+    let started = false;
+    let finished = false;
+    const task = runtime.launchTask({
+      label: "ingest:t53",
+      agent: harness.agent,
+      vaultRoot: "/v",
+      needsLlm: true,
+      work: async () => {
+        started = true;
+        await new Promise((r) => setTimeout(r, 40));
+        finished = true;
+        return "completed-after-dispose";
+      },
+    });
+    harness.setDriving(false);
+    const idleP = (harness.agent as { whenIdle: () => Promise<void> }).whenIdle();
+    harness.releaseIdle();
+    await new Promise((r) => setTimeout(r, 5));
+    (harness.agent as { inject: (input: unknown) => void }).inject = () => {
+      throw new Error("session disposed");
+    };
+    await Promise.all([idleP, task]);
+    expect(started).toBe(true);
+    expect(finished).toBe(true);
+    expect(
+      logs.some(
+        (l) =>
+          l.includes("inject report failed") ||
+          l.includes("origin session closed") ||
+          l.includes("completed-after-dispose"),
+      ),
+    ).toBe(true);
+    runtime.dispose();
+  });
+
 });
