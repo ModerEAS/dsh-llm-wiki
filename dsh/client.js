@@ -2,7 +2,7 @@
  * LLM Wiki settings section — DSH WebUI client bundle (hand-written, no build step).
  *
  * Loaded by the browser module table as the `./client` export of the
- * `dsh-llm-wiki` bundle package (see dsh/package.json `dsh.client` +
+ * `dsh-llm-wiki` bundle package (see dsh/package.json nested `dsh.client` +
  * `exports["./client"]`). Factory form only: registering work happens in
  * `apply()`, never at module top level.
  *
@@ -186,18 +186,29 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         const disposers = [];
         try {
+          try {
+            ctx.logger?.info?.("[llm-wiki] client apply: registering settings.section");
+          } catch (_) {}
           const t = ctx.locale?.bind ? ctx.locale.bind(NS) : null;
           if (ctx.locale?.register) {
             disposers.push(
               ctx.effect(() => ctx.locale.register(NS, STRINGS), "wiki-ui: dictionaries"),
             );
           }
-          // configForms.get always returns a controller; do NOT early-return on
-          // a "missing" scope. whileServed mounts only when Host describe lists
-          // the llm-wiki namespace (requires volatile Config fields on Host).
-          if (!ctx.configForms?.whileServed || !ctx.slots?.inject || !ctx.slots?.register) {
+          // Top-level Settings nav entries (Models, Agent presets, …) register
+          // `settings.section` directly. `whileServed` is for `plugins.item`
+          // cards inside Built-in plugins — gating the nav on it hid the page
+          // entirely when the client finally loaded. Host Config still needs
+          // `.volatile()` so describe serves values into configForms.get.
+          if (!ctx.slots?.inject || !ctx.slots?.register) {
             try {
-              ctx.logger?.warn?.("[llm-wiki] settings UI skipped: configForms/slots unavailable");
+              ctx.logger?.warn?.("[llm-wiki] settings UI skipped: slots unavailable");
+            } catch (_) {}
+            return () => {};
+          }
+          if (!ctx.configForms?.get) {
+            try {
+              ctx.logger?.warn?.("[llm-wiki] settings UI skipped: configForms unavailable");
             } catch (_) {}
             return () => {};
           }
@@ -205,19 +216,17 @@ window.__ModuleLoader__.load({
           disposers.push(
             ctx.effect(
               () =>
-                ctx.configForms.whileServed([ENTRY], () =>
-                  ctx.slots.inject("settings.section", () =>
-                    ctx.slots.register(
-                      {
-                        name: "settings.section",
-                        id: "wiki",
-                        order: 60,
-                        label: () => (t ? t("title") : "LLM Wiki"),
-                        locale: NS,
-                        inject: () => ({ scope, t }),
-                      },
-                      WikiSection,
-                    ),
+                ctx.slots.inject("settings.section", () =>
+                  ctx.slots.register(
+                    {
+                      name: "settings.section",
+                      id: "wiki",
+                      order: 60,
+                      label: () => (t ? t("title") : "LLM Wiki"),
+                      locale: NS,
+                      inject: () => ({ scope, t }),
+                    },
+                    WikiSection,
                   ),
                 ),
               "wiki-ui: settings page",

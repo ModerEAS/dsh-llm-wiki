@@ -2,7 +2,7 @@
   "name": "dsh-llm-wiki",
   "version": "0.6.3",
   "private": true,
-  "description": "LLM Wiki as a native DeepSeek Harness plugin — self-maintaining, Obsidian-compatible knowledge base.",
+  "description": "LLM Wiki as a native DeepSeek Harness plugin \u2014 self-maintaining, Obsidian-compatible knowledge base.",
   "type": "module",
   "main": "./host-index.js",
   "exports": {
@@ -22,11 +22,14 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
-  },
-  "dsh.client": {
-    "platform": "web",
-    "inject": ["slots", "locale", "configForms"],
-    "immediately": true
   }
 }

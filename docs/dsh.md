@@ -76,8 +76,8 @@ the following need a live DeepSeek Harness (`0.2.1-rc.3`, desktop profile):
 - [ ] After HMR reload, old sessions keep guard + recall (no bare sessions,
       no double registration).
 - [ ] Two sessions on different vaults never cross rebuilds/config.
-- [ ] Settings section renders (Host `WikiConfigSchema` fields must be
-      `.volatile()` so `settings.describe` exposes `llm-wiki`; client
-      `configForms.whileServed` then mounts `settings.section`).
+- [ ] Settings section renders (`package.json` must nest `dsh.client` under
+      `dsh` — a top-level `"dsh.client"` key is ignored; Host Config fields
+      need `.volatile()` so describe serves values into the section).
 - [ ] With an approval policy composed, wiki tools allow/deny as
       documented; subagent synthesis cannot escalate.
