@@ -156,11 +156,17 @@ export interface DshToolExec {
   [key: string]: unknown;
 }
 
-/** DSH `defineTool` shape (dsh-tools contract): value in, rendered text out. */
+/** DSH tool shape (dsh-tools contract): value in, rendered text out.
+ * `parameters` is the COMPILED JSON Schema object root
+ * (`{ type: "object", properties, required? }`) that `register()` expects —
+ * `defineTool()` compiles it in-tree; out-of-tree `def()` compiles our
+ * authoring DSL map (`DshParameterSpec`) by hand, so the raw DSL never
+ * reaches the host (raw DSL serializes with `type: null` and the model API
+ * rejects the function schema). */
 export interface DshToolDefinition {
   name: string;
   description: string;
-  parameters: Record<string, DshParameterSpec>;
+  parameters: Record<string, unknown>;
   output: {
     schema: Record<string, unknown>;
     render: (
@@ -180,6 +186,7 @@ export interface DshParameterSpec {
   default?: JsonValue;
   items?: DshParameterSpec;
   properties?: Record<string, DshParameterSpec>;
+  additionalProperties?: boolean;
 }
 
 /**

@@ -58,6 +58,31 @@ describe("buildWikiTools", () => {
     expect(tools.map((t) => t.name)).toContain("wiki_capture_trajectory");
   });
 
+  it("parameters compile to a JSON Schema object root (register contract)", () => {
+    const tools = buildWikiTools(host());
+    for (const tool of tools) {
+      const params = tool.parameters as Record<string, unknown>;
+      // The host registry (and the model API behind it) needs a real object
+      // root — the raw DSL map serializes with `type: null` and the model
+      // API 400s the function schema.
+      expect(params.type).toBe("object");
+      expect(params.properties).toBeTypeOf("object");
+      const props = params.properties as Record<string, Record<string, unknown>>;
+      for (const [key, node] of Object.entries(props)) {
+        // `required: true` hoists to the parent array, never stays on the node.
+        expect(node.required, `${tool.name}.${key}.required`).toBeUndefined();
+        if (node.type === "object") {
+          expect(typeof node.additionalProperties, `${tool.name}.${key}`).toBe("boolean");
+        }
+      }
+    }
+    const bootstrap = tools.find((t) => t.name === "wiki_bootstrap");
+    expect(bootstrap?.parameters).toMatchObject({
+      type: "object",
+      required: ["topic"],
+    });
+  });
+
   it("wiki_status returns structured data on a real vault", async () => {
     const h = host();
     const tools = buildWikiTools(h);

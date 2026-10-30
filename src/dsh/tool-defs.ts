@@ -7,7 +7,11 @@
  * adaptations (all per the verified dsh-tools contract):
  *
  * - `parameters` use DSH's schema DSL (`{ type, required?, description? }`),
- *   not TypeBox.
+ *   not TypeBox — and `def()` compiles the DSL map into the JSON Schema
+ *   object root (`{ type: "object", properties, required? }`) that
+ *   `ctx.tools.register` expects (`defineTool` does this in-tree; the raw
+ *   DSL must never reach the host — it serializes with `type: null` and the
+ *   model API rejects the function schema).
  * - `output` is mandatory: the uniform `{ text, data? }` envelope
  *   (`ENVELOPE_SCHEMA`), rendered from `text` only.
  * - `execute(args, exec)` returns the JSON value; failures propagate as
@@ -45,7 +49,7 @@ import {
   runStatus,
   runWatch,
 } from "./runners.js";
-import type { DshContext, DshToolDefinition, DshToolExec, WikiToolValue } from "./types.js";
+import type { DshContext, DshParameterSpec, DshToolDefinition, DshToolExec, WikiToolValue } from "./types.js";
 import { configForVault } from "./vault-state.js";
 
 export interface ToolHost {
@@ -113,9 +117,63 @@ function trajectoryGateText(tool: string): WikiToolValue {
   };
 }
 
+/**
+ * Compile the authoring DSL map into the JSON Schema object root the host
+ * registry (and the model API behind it) expects. Mirrors the in-tree
+ * `parameterSchemaSpecToJsonSchema` semantics: per-property `required: true`
+ * hoists into the parent `required` array; annotations (`description`,
+ * `default`) pass through; the author-only `json` type becomes an
+ * annotation-only node; object nodes get explicit `additionalProperties`
+ * (our object params are free-form, so the open default `true` applies).
+ */
+export function compileParameters(
+  params: Record<string, DshParameterSpec>,
+): Record<string, unknown> {
+  const properties: Record<string, unknown> = {};
+  const required: string[] = [];
+  for (const [key, spec] of Object.entries(params)) {
+    const { required: req, ...node } = spec;
+    properties[key] = compileNode(node as DshParameterSpec);
+    if (req === true) required.push(key);
+  }
+  return {
+    type: "object",
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+  };
+}
+
+function compileNode(spec: DshParameterSpec): Record<string, unknown> {
+  const { required: _req, items, properties, additionalProperties, ...rest } = spec;
+  void _req;
+  if (spec.type === "json") {
+    const { type: _type, ...annotations } = rest;
+    void _type;
+    return annotations as Record<string, unknown>;
+  }
+  const node: Record<string, unknown> = { ...rest };
+  if (spec.type === "array" && items) node.items = compileNode(items);
+  if (spec.type === "object") {
+    node.additionalProperties = additionalProperties ?? true;
+    if (properties) {
+      const sub: Record<string, unknown> = {};
+      const subRequired: string[] = [];
+      for (const [key, value] of Object.entries(properties)) {
+        const { required: req, ...restValue } = value;
+        sub[key] = compileNode(restValue as DshParameterSpec);
+        if (req === true) subRequired.push(key);
+      }
+      node.properties = sub;
+      if (subRequired.length > 0) node.required = subRequired;
+    }
+  }
+  return node;
+}
+
 function def(
   host: ToolHost,
-  definition: Omit<DshToolDefinition, "output" | "execute"> & {
+  definition: Omit<DshToolDefinition, "output" | "execute" | "parameters"> & {
+    parameters: Record<string, DshParameterSpec>;
     run: Runner;
     trajectoryGated?: boolean;
   },
@@ -124,7 +182,7 @@ function def(
   return {
     name: definition.name,
     description: definition.description,
-    parameters: definition.parameters,
+    parameters: compileParameters(definition.parameters),
     output: { schema: ENVELOPE_SCHEMA, render: renderEnvelope },
     execute: async (args: Record<string, unknown>, exec: DshToolExec) => {
       if (definition.trajectoryGated && !gatedTrajectories(host, exec)) {

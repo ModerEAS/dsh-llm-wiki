@@ -17,6 +17,7 @@
  * bundle is absent: every access below is defensive.
  */
 
+import z from "@deepseek-ai/schemastery";
 import type { WikiLogger } from "./logger.js";
 import type { DshContext } from "./types.js";
 
@@ -24,48 +25,21 @@ import type { DshContext } from "./types.js";
 export const WIKI_NAMESPACE = "llm-wiki";
 
 /**
- * Host Config JSON Schema for the `llm-wiki` plugin row. Every field maps
- * 1:1 onto a `TaskConfig` key already read by the lib; no existing key
- * semantics change.
+ * Host Config schema for the `llm-wiki` plugin row. Must be a Schemastery
+ * schema (cordis validates via Standard Schema `~standard.validate`; a plain
+ * JSON Schema object fails activation with "Cannot read properties of
+ * undefined (reading 'validate')"). Every field maps 1:1 onto a `TaskConfig`
+ * key already read by the lib; no existing key semantics change.
  */
-export const WikiConfigSchema: Record<string, unknown> = {
-  type: "object",
-  properties: {
-    autoRecall: {
-      type: "boolean",
-      default: true,
-      description: "Automatic per-turn wiki recall injection.",
-    },
-    notices: {
-      type: "boolean",
-      default: true,
-      description: "Surface wiki activity (recall hits, reminders, reports) in the UI.",
-    },
-    trajectories: {
-      type: "boolean",
-      default: false,
-      description: "Opt-in agent-trajectory memory (capture / distill / recall skills).",
-    },
-    taskModel: {
-      type: "string",
-      description: "Background synthesis model as 'provider/id'. Empty = session model.",
-    },
-    semanticWeight: {
-      type: "number",
-      default: 0.5,
-      description: "Weight of the semantic signal in hybrid recall (0 = pure lexical).",
-    },
-    recallLinksThreshold: {
-      type: "number",
-      default: 50,
-      description: "Vault page count above which recall returns links-first.",
-    },
-    ambientPersonalVault: {
-      type: "boolean",
-      description: "Let the personal vault fire ambient recall outside project vaults.",
-    },
-  },
-};
+export const WikiConfigSchema = z.object({
+  autoRecall: z.boolean().default(true).description("Automatic per-turn wiki recall injection."),
+  notices: z.boolean().default(true).description("Surface wiki activity (recall hits, reminders, reports) in the UI."),
+  trajectories: z.boolean().default(false).description("Opt-in agent-trajectory memory (capture / distill / recall skills)."),
+  taskModel: z.string().description("Background synthesis model as 'provider/id'. Empty = session model."),
+  semanticWeight: z.number().default(0.5).description("Weight of the semantic signal in hybrid recall (0 = pure lexical)."),
+  recallLinksThreshold: z.number().default(50).description("Vault page count above which recall returns links-first."),
+  ambientPersonalVault: z.boolean().description("Let the personal vault fire ambient recall outside project vaults."),
+});
 
 /** Field list shared conceptually with the client section (kept in sync by hand). */
 export const WIKI_SETTINGS_FIELDS = [
