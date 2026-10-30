@@ -148,3 +148,47 @@ describe("withVaultWrite (process singleton, H30)", () => {
     }
   });
 });
+
+describe("configForVault autoRecall isolation (T8.2/H05)", () => {
+  it("keeps opposite autoRecall flags per vault without cross-cover", async () => {
+    const fs = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "t82-cfg-"));
+    const aRoot = path.join(base, "a");
+    const bRoot = path.join(base, "b");
+    const aDot = path.join(aRoot, ".llm-wiki");
+    const bDot = path.join(bRoot, ".llm-wiki");
+    const aPi = path.join(aRoot, ".pi");
+    const bPi = path.join(bRoot, ".pi");
+    await fs.mkdir(aDot, { recursive: true });
+    await fs.mkdir(bDot, { recursive: true });
+    await fs.mkdir(aPi, { recursive: true });
+    await fs.mkdir(bPi, { recursive: true });
+    await fs.writeFile(
+      path.join(aPi, "settings.json"),
+      JSON.stringify({ "llm-wiki": { autoRecall: false } }),
+    );
+    await fs.writeFile(
+      path.join(bPi, "settings.json"),
+      JSON.stringify({ "llm-wiki": { autoRecall: true } }),
+    );
+    // loadTaskConfig reads project settings via cwd; configForVault uses vaultRoot
+    // as the loadTaskConfig argument (see vault-state.ts).
+    const a = configForVault(aRoot, aDot, true);
+    const b = configForVault(bRoot, bDot, true);
+    expect(a.autoRecall).toBe(false);
+    expect(b.autoRecall).toBe(true);
+    // Mutate A's on-disk flag; B's cached value must stay true until its own invalidate.
+    await fs.writeFile(
+      path.join(aPi, "settings.json"),
+      JSON.stringify({ "llm-wiki": { autoRecall: true } }),
+    );
+    invalidateVaultConfig(aRoot);
+    const a2 = configForVault(aRoot, aDot, true);
+    const bStill = configForVault(bRoot, bDot);
+    expect(a2.autoRecall).toBe(true);
+    expect(bStill.autoRecall).toBe(true);
+    expect(bStill).toBe(b);
+  });
+});

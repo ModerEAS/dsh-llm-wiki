@@ -176,7 +176,9 @@ export function installPreStepListener(
       const firstMessage = (decision.messages ?? [])[0] as { content?: unknown } | undefined;
       const prompt = textOf(firstMessage?.content);
       let recallBlock = "";
-      if (prompt.trim() && autoRecallEnabled(config)) {
+      if (!autoRecallEnabled(config)) {
+        logger?.info(`autoRecall disabled for vault ${paths.root}`);
+      } else if (prompt.trim()) {
         const results = await searchWikiHybrid(paths, prompt, 3, 5, false, { config });
         if (results.length > 0) {
           const linksOnly = shouldUseLinksFirst(vaultPageCount(paths, false), config);
@@ -186,6 +188,11 @@ export function installPreStepListener(
           });
           if (formatted) recallBlock = formatted;
         }
+        logger?.info(
+          recallBlock
+            ? `autoRecall injected (${recallBlock.length} chars) for vault ${paths.root}`
+            : `autoRecall empty for vault ${paths.root}`,
+        );
       }
       if (!recallBlock) return decision;
       const recallMessage = {

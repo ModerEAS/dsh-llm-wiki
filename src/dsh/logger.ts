@@ -32,6 +32,7 @@ export function createLogger(ctx: DshContext | undefined): WikiLogger {
       } catch {
         /* fall through */
       }
+      // info stays logger-primary; console only when host logger missing
       if (!ctx?.logger?.info) fallback("info", message);
     },
     warn: (message) => {
@@ -40,7 +41,9 @@ export function createLogger(ctx: DshContext | undefined): WikiLogger {
       } catch {
         /* fall through */
       }
-      if (!ctx?.logger?.warn) fallback("warn", message);
+      // Always mirror warn/error to console so headless stderr captures H24
+      // diagnostics even when ctx.logger exists but is not tee'd to our pipes.
+      fallback("warn", message);
     },
     error: (message) => {
       try {
@@ -48,7 +51,7 @@ export function createLogger(ctx: DshContext | undefined): WikiLogger {
       } catch {
         /* fall through */
       }
-      if (!ctx?.logger?.error) fallback("error", message);
+      fallback("error", message);
     },
   };
 }
