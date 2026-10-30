@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -197,5 +197,27 @@ describe("buildWikiCommands", () => {
       logger.warn("w");
       logger.error("e");
     }).not.toThrow();
+  });
+});
+
+describe("session cwd vs process.cwd (T2.3/D1)", () => {
+  it("wiki_status follows workingDirectory, not process.cwd()", async () => {
+    const decoy = mkdtempSync(join(tmpdir(), "dsh-t23-decoy-"));
+    const original = process.cwd();
+    try {
+      process.chdir(decoy);
+      // session points at the vault; process lives in empty decoy
+      const h = host();
+      const tools = buildWikiTools(h);
+      const status = tools.find((t) => t.name === "wiki_status");
+      const value = await status?.execute({}, { agent: { session: { id: "t23" } } });
+      expect(value?.text).toContain("LLM Wiki Status");
+      expect(value?.data).toMatchObject({ totalPages: expect.any(Number) });
+      // Must NOT create a vault under the decoy process.cwd()
+      expect(existsSync(join(decoy, ".llm-wiki"))).toBe(false);
+    } finally {
+      process.chdir(original);
+      rmSync(decoy, { recursive: true, force: true });
+    }
   });
 });

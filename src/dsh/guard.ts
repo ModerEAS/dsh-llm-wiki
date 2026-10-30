@@ -107,9 +107,10 @@ export function installDshGuardrails(ctx: DshContext, logger?: WikiLogger): () =
   const disposers: Array<() => void> = [];
 
   try {
-    const guard = ctx.tools?.guard;
-    if (typeof guard === "function") {
-      const dispose = guard((exec: DshToolExec) => {
+    // Must call through the service object — extracting `.guard` drops `this`
+    // and crashes inside ScopedLayers (`reading 'layers'`).
+    if (ctx.tools && typeof ctx.tools.guard === "function") {
+      const dispose = ctx.tools.guard((exec: DshToolExec) => {
         try {
           const name = String(exec.name ?? "");
           if (!GUARDED_TOOLS.has(name)) return undefined;

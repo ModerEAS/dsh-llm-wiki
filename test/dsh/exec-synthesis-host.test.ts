@@ -133,3 +133,34 @@ describe("toDshOutputSchema", () => {
     });
   });
 });
+
+describe("synthesize prepareCall degrade (T10.3/H23)", () => {
+  it("warns and continues via llm.stream when prepareCall throws", async () => {
+    const warnings: string[] = [];
+    const logger = {
+      info: () => undefined,
+      warn: (m: string) => warnings.push(m),
+      error: () => undefined,
+    };
+    async function* stream() {
+      yield { kind: "text-delta", delta: "ok-after-degrade" };
+      yield { kind: "finish" };
+    }
+    const ctx = {
+      llm: {
+        prepareCall: async () => {
+          throw new Error("maxTokens unsupported");
+        },
+        stream: () => stream(),
+      },
+    };
+    const parent = {
+      session: { id: "p" },
+      options: { provider: "deepseek", model: "deepseek-chat" },
+    };
+    const result = await synthesize(ctx as never, parent as never, { prompt: "hi" }, logger);
+    expect(result.lane).toBe("llm-stream");
+    expect(result.text).toBe("ok-after-degrade");
+    expect(warnings.some((w) => /prepareCall unavailable/.test(w))).toBe(true);
+  });
+});

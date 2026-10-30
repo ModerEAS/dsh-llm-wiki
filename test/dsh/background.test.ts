@@ -423,3 +423,67 @@ describe("createDshRuntime needsLlm whenIdle wrap (T5/T6)", () => {
   });
 
 });
+
+describe("watchCompaction drain (T10.9/H20)", () => {
+  it("compaction/start drains the compacting session's pending tasks", async () => {
+    let listener: ((session: unknown, event: unknown) => void) | undefined;
+    const ctx = {
+      on: (_event: string, fn: (...args: never[]) => unknown) => {
+        listener = fn as (session: unknown, event: unknown) => void;
+        return () => undefined;
+      },
+      effect: (fn: () => () => void) => fn(),
+    } as unknown as DshContext;
+    const runtime = createDshRuntime({}, silentLogger());
+    const reports: unknown[] = [];
+    const agent = {
+      session: { id: "sess-compact" },
+      inject: (input: unknown) => reports.push(input),
+    } as unknown as DshAgent;
+    let ran = false;
+    const done = runtime.launchTask({
+      label: "bg-before-compact",
+      agent,
+      vaultRoot: "/v",
+      work: async () => {
+        ran = true;
+        return "drained-on-compact";
+      },
+    });
+    // Task already ran (non-needsLlm). Launch a queued needsLlm one while "busy".
+    ensureWhenIdleDrain(agent);
+    let driving = true;
+    (agent as { status?: string }).status = "running";
+    (agent as { whenIdle?: () => Promise<void> }).whenIdle = () =>
+      new Promise((resolve) => {
+        if (!driving) resolve();
+        else setTimeout(() => resolve(), 5);
+      });
+    watchCompaction(ctx, runtime, silentLogger());
+    expect(listener).toBeTypeOf("function");
+    // Fire compaction while a pending needsLlm task exists
+    let started = false;
+    const pending = runtime.launchTask({
+      label: "needs-llm-compact",
+      agent,
+      vaultRoot: "/v",
+      needsLlm: true,
+      work: async () => {
+        started = true;
+        return "compact-drain-ok";
+      },
+    });
+    expect(runtime.pendingCount("sess-compact")).toBeGreaterThanOrEqual(1);
+    // compaction/start backstop
+    listener?.({ id: "sess-compact" }, { type: "compaction/start" });
+    // release idle so drain can finish if whenIdle wrap cooperates
+    driving = false;
+    (agent as { status?: string }).status = "idle";
+    await runtime.drainSession("sess-compact", 2000);
+    await pending;
+    await done;
+    expect(ran).toBe(true);
+    expect(started).toBe(true);
+    runtime.dispose();
+  });
+});
