@@ -137,7 +137,10 @@ async function synthesizeViaSubagent(
     }
   })();
   const provider = providers.includes("spawn") ? "spawn" : (providers[0] ?? "spawn");
-  const preset = usePreset && provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
+  // Preset path needs ctx.agentPresets; without it startActivation rejects the option.
+  const hasPresets = Boolean((ctx as { agentPresets?: unknown }).agentPresets);
+  const preset =
+    usePreset && hasPresets && provider === "spawn" ? SYNTHESIS_PRESET_ID : undefined;
 
   // Must call through the service object — extracting the method drops `this`
   // and crashes inside expectProvider.
