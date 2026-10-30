@@ -454,6 +454,10 @@ export async function runIngest(
           label: `ingest:${s.id}`,
           agent: deps.agent,
           vaultRoot: paths.root,
+          // Synthesis hits the model: wait for the turn to end first or the
+          // foreground turn dies with TRANSPORT (T5/T6). Runs as a
+          // maintenance task — no new turn, no wakeup.
+          needsLlm: true,
           work: async () => ingestOneSource(deps, paths, s, config, override ?? undefined),
         })
         .catch(() => undefined);
@@ -773,6 +777,8 @@ export async function runReindexEmbeddings(
       label,
       agent: deps.agent,
       vaultRoot: paths.root,
+      // Remote embeddings hit the network like synthesis: same idle gate.
+      needsLlm: true,
       work: async () => {
         const stats = await reindexEmbeddings(paths, embedder, { force });
         appendEvent(paths, {
