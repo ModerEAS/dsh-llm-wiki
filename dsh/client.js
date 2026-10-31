@@ -37,6 +37,12 @@ window.__ModuleLoader__.load({
         discard: "Discard",
         close: "Close",
         unavailable: "Settings unavailable",
+        "panel.subtitle": "Vault status, capabilities, and background jobs.",
+        "panel.refresh": "Refresh",
+        "panel.loading": "Loading wiki status…",
+        "panel.noVault": "No wiki vault here yet.",
+        "panel.noVaultHint": "Run /wiki-bootstrap <topic> in this project.",
+        "panel.settingsHint": "Edit in Settings → LLM Wiki",
       },
       zh: {
         "meta.title": "LLM Wiki",
@@ -47,8 +53,16 @@ window.__ModuleLoader__.load({
         discard: "放弃",
         close: "关闭",
         unavailable: "设置不可用",
+        "panel.subtitle": "知识库状态、能力自检与后台任务。",
+        "panel.refresh": "刷新",
+        "panel.loading": "正在加载知识库状态……",
+        "panel.noVault": "此处还没有知识库。",
+        "panel.noVaultHint": "在此项目运行 /wiki-bootstrap <topic>。",
+        "panel.settingsHint": "去“设置 → LLM Wiki”修改",
       },
     };
+
+    const PANEL_ID = "wiki-status";
 
     const FIELDS = [
       {
@@ -99,6 +113,223 @@ window.__ModuleLoader__.load({
       return React.useSyncExternalStore(
         (cb) => scope.subscribe(cb),
         () => scope.getSnapshot(),
+      );
+    }
+
+    const rowStyle = { display: "flex", gap: 8, fontSize: 13 };
+    const keyStyle = { color: "var(--dsw-alias-text-secondary, #888)", minWidth: 132 };
+
+    function useStatusJson(url) {
+      const [state, setState] = React.useState({ loading: true, data: null, error: null });
+      const refresh = React.useCallback(() => {
+        let cancelled = false;
+        setState((s) => ({ ...s, loading: true, error: null }));
+        fetch(url)
+          .then((r) => r.json())
+          .then((data) => {
+            if (!cancelled) setState({ loading: false, data, error: null });
+          })
+          .catch((err) => {
+            if (!cancelled) setState({ loading: false, data: null, error: String(err) });
+          });
+        return () => {
+          cancelled = true;
+        };
+      }, [url]);
+      React.useEffect(() => refresh(), [refresh]);
+      return { ...state, refresh };
+    }
+
+    function SettingsSummary(props) {
+      const { scope, t } = props;
+      const snap = useForm(scope);
+      const value = (snap && snap.value) || {};
+      const on = (v) => (v ? "on" : "off");
+      return h(
+        "div",
+        { style: { display: "grid", gap: 4, fontSize: 13 } },
+        h(
+          "div",
+          { style: rowStyle },
+          h("span", { style: keyStyle }, "Automatic recall"),
+          h("span", null, on(value.autoRecall !== false)),
+        ),
+        h(
+          "div",
+          { style: rowStyle },
+          h("span", { style: keyStyle }, "UI notices"),
+          h("span", null, on(value.notices !== false)),
+        ),
+        h(
+          "div",
+          { style: rowStyle },
+          h("span", { style: keyStyle }, "Trajectories"),
+          h("span", null, on(value.trajectories === true)),
+        ),
+        h(
+          "div",
+          { style: rowStyle },
+          h("span", { style: keyStyle }, "Synthesis model"),
+          h("span", null, String(value.taskModel || "(session model)")),
+        ),
+        h(
+          "small",
+          { style: { color: "var(--dsw-alias-text-secondary, #888)" } },
+          t ? t("panel.settingsHint") : "Edit in Settings → LLM Wiki",
+        ),
+      );
+    }
+
+    function WikiStatusIcon(props) {
+      const size = (props && props.size) || 20;
+      return h("span", { style: { fontSize: size, lineHeight: 1 }, title: "LLM Wiki" }, "🧠");
+    }
+
+    function WikiStatusPanel(props) {
+      const { scope, t } = props;
+      const [cwd, setCwd] = React.useState(null);
+      const url = "/wiki/status.json" + (cwd ? "?cwd=" + encodeURIComponent(cwd) : "");
+      const { loading, data, error, refresh } = useStatusJson(url);
+      const rows = [];
+      let body = null;
+      if (loading && !data) {
+        body = h("div", null, t ? t("panel.loading") : "Loading wiki status…");
+      } else if (error || (data && data.ok === false)) {
+        body = h(
+          "div",
+          { style: { display: "grid", gap: 4 } },
+          h("div", null, t ? t("panel.noVault") : "No wiki vault here yet."),
+          h(
+            "small",
+            { style: { color: "var(--dsw-alias-text-secondary, #888)" } },
+            t ? t("panel.noVaultHint") : "Run /wiki-bootstrap <topic> in this project.",
+          ),
+        );
+      } else if (data) {
+        const st = data.status || {};
+        const cap = st.capabilities || {};
+        const qmd = st.qmd || {};
+        const dash = data.dashboard || {};
+        const ui = data.ui || {};
+        const kv = (k, v) =>
+          h(
+            "div",
+            { key: k, style: rowStyle },
+            h("span", { style: keyStyle }, k),
+            h("span", null, String(v)),
+          );
+        rows.push(
+          kv("Topic", st.topic ?? "Unknown"),
+          kv("Mode", st.mode ?? "personal"),
+          kv("Pages", st.totalPages ?? 0),
+          kv("Health", st.health ?? ""),
+          kv("Orphans / Gaps", (st.orphans ?? 0) + " / " + (st.gaps ?? 0)),
+          kv("Updated", st.lastUpdated || "Never"),
+          kv(
+            "QMD",
+            String(qmd.state ?? "") +
+              " · " +
+              (qmd.totalDocuments ?? 0) +
+              " docs · emb pending " +
+              (qmd.needsEmbedding ?? 0),
+          ),
+          kv("Semantic", cap.semantic ?? "?"),
+          kv("Jobs", cap.jobs ?? "?"),
+          kv("Cwd", cap.cwd ?? data.vaultRoot ?? ""),
+          kv(
+            "Recall/Traj/Notices",
+            [
+              cap.autoRecall ? "recall:on" : "recall:off",
+              cap.trajectories ? "traj:on" : "traj:off",
+              cap.notices === false ? "notices:off" : "notices:on",
+            ].join(" "),
+          ),
+          kv("Model", ui.modelLabel || cap.taskModel || "(session model)"),
+          kv("Tools", ui.toolCount ?? 0),
+          kv("Last recall", ui.lastRecallCount == null ? "—" : ui.lastRecallCount + " pages"),
+          kv(
+            "Background",
+            ui.lastBackground ||
+              (ui.background && ui.background.length
+                ? ui.background[ui.background.length - 1].label + " …"
+                : "—"),
+          ),
+          kv("Raw queue", dash.rawQueue ?? "?"),
+          kv("Zero backlinks", dash.zeroBacklinks ?? "?"),
+          kv("Stale 30d+", dash.staleCount ?? "?"),
+        );
+        if (ui.setupMessage) rows.push(kv("Notice", ui.setupMessage));
+        body = h("div", { style: { display: "grid", gap: 4 } }, ...rows);
+      }
+      return h(
+        "div",
+        { style: { padding: 16, display: "grid", gap: 12, maxWidth: 560 } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: 8 } },
+          h("h2", { style: { margin: 0, fontSize: 16 } }, "🧠 LLM Wiki"),
+          h("span", { style: { flex: 1 } }),
+          h("button", { onClick: refresh }, t ? t("panel.refresh") : "Refresh"),
+        ),
+        h(
+          "p",
+          { style: { margin: 0, color: "var(--dsw-alias-text-secondary, #888)", fontSize: 12 } },
+          t ? t("panel.subtitle") : "Vault status, capabilities, and background jobs.",
+        ),
+        h(SettingsSummary, { scope, t }),
+        data && data.vaults && data.vaults.length > 1
+          ? h(
+              "div",
+              { style: { display: "flex", gap: 4, flexWrap: "wrap", fontSize: 12 } },
+              ...data.vaults.map((root) =>
+                h(
+                  "button",
+                  {
+                    key: root,
+                    disabled: root === data.vaultRoot,
+                    onClick: () => setCwd(root),
+                    title: root,
+                  },
+                  String(root).split("/").pop() || root,
+                ),
+              ),
+            )
+          : null,
+        body,
+      );
+    }
+
+    function WikiDockLine(props) {
+      const sid = (props && (props.sessionId || (props.session && props.session.id))) || null;
+      const url = "/wiki/status.json" + (sid ? "?session=" + encodeURIComponent(sid) : "");
+      const [line, setLine] = React.useState(null);
+      React.useEffect(() => {
+        let cancelled = false;
+        let timer = null;
+        const load = () => {
+          fetch(url)
+            .then((r) => r.json())
+            .then((data) => {
+              if (cancelled) return;
+              const lines = (data && data.transient) || [];
+              setLine(lines.length ? lines[lines.length - 1].text : null);
+            })
+            .catch(() => {
+              if (!cancelled) setLine(null);
+            });
+        };
+        load();
+        timer = setInterval(load, 10000);
+        return () => {
+          cancelled = true;
+          if (timer) clearInterval(timer);
+        };
+      }, [url]);
+      if (!line) return null;
+      return h(
+        "div",
+        { style: { fontSize: 12, color: "var(--dsw-alias-text-secondary, #888)" } },
+        "🧠 " + line,
       );
     }
 
@@ -230,6 +461,66 @@ window.__ModuleLoader__.load({
                   ),
                 ),
               "wiki-ui: settings page",
+            ),
+          );
+          // G1: sidebar status panel — icon in the panellist + keyed main
+          // page. Root scope: no sessionId, so the panel reads the
+          // last-active vault (host default) with a vault picker fallback.
+          disposers.push(
+            ctx.effect(
+              () =>
+                ctx.slots.inject("sidebar.panellist", () =>
+                  ctx.slots.register(
+                    {
+                      name: "sidebar.panellist",
+                      id: PANEL_ID,
+                      order: 40,
+                      label: () => (t ? t("title") : "LLM Wiki"),
+                      locale: NS,
+                      inject: () => ({}),
+                    },
+                    WikiStatusIcon,
+                  ),
+                ),
+              "wiki-ui: sidebar icon",
+            ),
+          );
+          disposers.push(
+            ctx.effect(
+              () =>
+                ctx.slots.inject("main", () =>
+                  ctx.slots.register(
+                    {
+                      name: "main",
+                      key: PANEL_ID,
+                      label: () => (t ? t("title") : "LLM Wiki"),
+                      locale: NS,
+                      inject: () => ({ scope, t }),
+                    },
+                    WikiStatusPanel,
+                  ),
+                ),
+              "wiki-ui: status panel",
+            ),
+          );
+          // G2: transient recall/background line near the composer (session
+          // scope carries sessionId; renders nothing when notices are off).
+          disposers.push(
+            ctx.effect(
+              () =>
+                ctx.slots.inject("conversation.composer.dock", () =>
+                  ctx.slots.register(
+                    {
+                      name: "conversation.composer.dock",
+                      id: "wiki-dock",
+                      order: 20,
+                      locale: NS,
+                      inject: () => ({}),
+                    },
+                    WikiDockLine,
+                  ),
+                ),
+              "wiki-ui: composer dock",
             ),
           );
         } catch (err) {

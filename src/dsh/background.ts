@@ -34,6 +34,7 @@
 
 import type { WikiLogger } from "./logger.js";
 import type { DshAgent, DshContext } from "./types.js";
+import { patchUiState, pushSessionLine } from "./ui-state.js";
 
 export const WIKI_REPORT_SOURCE = "llm-wiki-report";
 
@@ -259,6 +260,18 @@ export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRunti
     promise = (async () => {
       try {
         if (disposed) return;
+        // Former `setStatus` site (G4): sidebar shows running/done/failed;
+        // the dock line is transient (client hides it when notices are off).
+        try {
+          if (opts.vaultRoot) {
+            patchUiState(opts.vaultRoot, {
+              background: { label: opts.label, phase: "running", at: new Date().toISOString() },
+            });
+          }
+          if (sessionId) pushSessionLine(sessionId, `background ${opts.label} started`);
+        } catch {
+          /* UI state must never break background work */
+        }
         let summary: string | null;
         if (opts.needsLlm === true) {
           const whenIdle = (origin as { whenIdle?: unknown } | undefined)?.whenIdle;
@@ -281,12 +294,42 @@ export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRunti
           } else {
             reportToOrigin(origin, summary);
           }
+          try {
+            if (opts.vaultRoot) {
+              patchUiState(opts.vaultRoot, {
+                background: {
+                  label: opts.label,
+                  phase: "done",
+                  at: new Date().toISOString(),
+                  note: summary.split("\n")[0],
+                },
+              });
+            }
+            if (sessionId) pushSessionLine(sessionId, summary.split("\n")[0]);
+          } catch {
+            /* UI state must never break background work */
+          }
         }
       } catch (error) {
         if (controller.signal.aborted || disposed) return;
         const message = error instanceof Error ? error.message : String(error);
         logger?.warn(`background task ${opts.label} failed: ${message}`);
         reportToOrigin(origin, `⚠️ Wiki background task \`${opts.label}\` failed: ${message}`);
+        try {
+          if (opts.vaultRoot) {
+            patchUiState(opts.vaultRoot, {
+              background: {
+                label: opts.label,
+                phase: "failed",
+                at: new Date().toISOString(),
+                note: message,
+              },
+            });
+          }
+          if (sessionId) pushSessionLine(sessionId, `background ${opts.label} failed`);
+        } catch {
+          /* UI state must never break background work */
+        }
       } finally {
         if (inFlight.get(opts.label) === task) inFlight.delete(opts.label);
       }

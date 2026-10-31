@@ -34,14 +34,26 @@ import { installDshGuardrails, selfCheckGuardrails } from "./guard.js";
 import { createLogger } from "./logger.js";
 import { installPreStepListener, installRecallInjection, isMainSession } from "./recall-inject.js";
 import { registerSettingsUi, WikiConfigSchema } from "./settings-ui.js";
+import { registerStatusRoute } from "./status-route.js";
 import { registerWikiTools } from "./tool-defs.js";
 import type { DshAgent, DshContext } from "./types.js";
+import { patchUiState } from "./ui-state.js";
 import { configForVault } from "./vault-state.js";
 
 export const PLUGIN_ID = "llm-wiki";
 
 /** Core services every profile must compose; the rest is defensive-optional. */
-export const inject = ["tools", "agents", "systemPrompt", "subagents", "llm", "workingDirectory", "commands", "settings", "tokenMeter"];
+export const inject = [
+  "tools",
+  "agents",
+  "systemPrompt",
+  "subagents",
+  "llm",
+  "workingDirectory",
+  "commands",
+  "settings",
+  "tokenMeter",
+];
 
 /** Row-config schema (validated at activation; see settings-ui.ts). */
 export const Config = WikiConfigSchema;
@@ -65,6 +77,7 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
   const agentDisposers = new Map<object, () => void>();
   let selfChecked = false;
   let migrationDone = false;
+  let toolCount = 0;
 
   const track = (dispose: () => void): void => {
     disposers.push(dispose);
@@ -73,6 +86,7 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
   // ── Shared (profile-wide) surfaces ──────────────────────
   try {
     const tools = registerWikiTools(host);
+    toolCount = tools.length;
     logger.info(`registered ${tools.length} wiki tools`);
   } catch (error) {
     logger.warn(`tool registration failed: ${(error as Error).message}`);
@@ -102,6 +116,28 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
     registerSettingsUi(ctx, logger);
   } catch (error) {
     logger.warn(`settings UI failed: ${(error as Error).message}`);
+  }
+  // Status route needs the optional `webServer` service, which is NOT in
+  // our inject list — direct `ctx.webServer` access throws on the cordis
+  // proxy. Discover it via inject() like settings-ui.ts does; headless
+  // profiles (no webServer) simply never fire the callback (fallback B).
+  try {
+    const inject = (
+      ctx as { inject?: (deps: string[], fn: (c: DshContext) => void) => void }
+    ).inject;
+    if (typeof inject === "function") {
+      inject(["webServer"], (scoped) => {
+        try {
+          scoped.effect?.(() => registerStatusRoute(scoped, logger), "llm-wiki status route");
+        } catch (error) {
+          logger.warn(`status route failed: ${(error as Error).message}`);
+        }
+      });
+    } else {
+      track(registerStatusRoute(ctx, logger));
+    }
+  } catch (error) {
+    logger.warn(`status route failed: ${(error as Error).message}`);
   }
 
   // ── Per-agent surfaces (survivors + newcomers) ──────────
@@ -159,6 +195,13 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
             } catch {
               /* notice is best-effort */
             }
+            try {
+              patchUiState(resolveVaultPaths(cwd).root, {
+                setupMessage: `Personal wiki layout fixed: flattened ${migration.moved.length} entries.`,
+              });
+            } catch {
+              /* UI state must never break the agent */
+            }
           }
         } catch (error) {
           logger.warn(`doubled-dotdir migration skipped: ${(error as Error).message}`);
@@ -170,6 +213,19 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
       if (!applies) return;
 
       const paths = resolveVaultPaths(cwd);
+      try {
+        patchUiState(paths.root, {
+          loaded: true,
+          toolCount,
+          trajectoriesOn: vaultConfig.trajectories === true,
+          modelLabel: vaultConfig.taskModel
+            ? `${vaultConfig.taskModel.provider}/${vaultConfig.taskModel.id}`
+            : null,
+          notices: vaultConfig.notices !== false,
+        });
+      } catch {
+        /* UI state must never break the agent */
+      }
       if (!existsSync(join(paths.dotWiki, "config.json"))) {
         try {
           const result = bootstrapVault(paths, { topic: "pending", mode: "personal" });
@@ -183,11 +239,29 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
             } catch {
               /* notice is best-effort */
             }
+            try {
+              patchUiState(paths.root, {
+                loaded: true,
+                setupMessage: "Wiki created (topic pending).",
+              });
+            } catch {
+              /* UI state must never break the agent */
+            }
           } else {
             logger.warn(`auto-bootstrap blocked at ${paths.root}`);
+            try {
+              patchUiState(paths.root, { setupMessage: "Wiki setup blocked (bootstrap)." });
+            } catch {
+              /* UI state must never break the agent */
+            }
           }
         } catch (error) {
           logger.warn(`auto-bootstrap failed: ${(error as Error).message}`);
+          try {
+            patchUiState(paths.root, { setupMessage: "Wiki setup blocked (bootstrap)." });
+          } catch {
+            /* UI state must never break the agent */
+          }
         }
         return;
       }

@@ -49,7 +49,13 @@ import {
   runStatus,
   runWatch,
 } from "./runners.js";
-import type { DshContext, DshParameterSpec, DshToolDefinition, DshToolExec, WikiToolValue } from "./types.js";
+import type {
+  DshContext,
+  DshParameterSpec,
+  DshToolDefinition,
+  DshToolExec,
+  WikiToolValue,
+} from "./types.js";
 import { configForVault } from "./vault-state.js";
 
 export interface ToolHost {
@@ -289,7 +295,7 @@ export function buildWikiTools(host: ToolHost): DshToolDefinition[] {
       name: "wiki_status",
       description: "Report wiki health and stats instantly from generated registry.",
       parameters: {},
-      run: (cwd) => runStatus(cwd),
+      run: (cwd, _args, deps) => runStatus(cwd, deps),
     }),
     def(host, {
       name: "wiki_rebuild_meta",

@@ -83,7 +83,11 @@ export function buildWikiCommands(host: CommandHost): WikiCommand[] {
     {
       name: "wiki-status",
       description: "Report LLM Wiki health and stats for this project.",
-      handler: (invocation) => direct(() => runStatus(cwdFor(host, invocation.agent)), host.logger),
+      handler: (invocation) =>
+        direct(
+          () => runStatus(cwdFor(host, invocation.agent), depsFor(host, invocation)),
+          host.logger,
+        ),
     },
     {
       name: "wiki-search",

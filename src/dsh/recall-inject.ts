@@ -33,12 +33,14 @@ import {
 } from "../../extensions/llm-wiki/lib/recall.js";
 import {
   autoRecallEnabled,
+  noticesEnabled,
   personalVaultIsAmbient,
 } from "../../extensions/llm-wiki/lib/task-config.js";
 import { resolveProjectVaultRoot, resolveVaultPaths } from "../../extensions/llm-wiki/lib/utils.js";
 import type { DshRuntime } from "./background.js";
 import type { WikiLogger } from "./logger.js";
 import type { DshAgent, DshContext, PreStepDecision } from "./types.js";
+import { patchUiState, pushSessionLine } from "./ui-state.js";
 import { configForVault, takePendingRebuild, withVaultWrite } from "./vault-state.js";
 
 /** Per-turn dedupe: at most one recall injection per (session, turn). */
@@ -176,11 +178,13 @@ export function installPreStepListener(
       const firstMessage = (decision.messages ?? [])[0] as { content?: unknown } | undefined;
       const prompt = textOf(firstMessage?.content);
       let recallBlock = "";
+      let recallCount = 0;
       if (!autoRecallEnabled(config)) {
         logger?.info(`autoRecall disabled for vault ${paths.root}`);
       } else if (prompt.trim()) {
         const results = await searchWikiHybrid(paths, prompt, 3, 5, false, { config });
         if (results.length > 0) {
+          recallCount = results.length;
           const linksOnly = shouldUseLinksFirst(vaultPageCount(paths, false), config);
           const formatted = formatRecallContext(results, {
             linksOnly,
@@ -195,6 +199,20 @@ export function installPreStepListener(
         );
       }
       if (!recallBlock) return decision;
+      // Former `setStatus("recalled N page(s)")` site (G4): noisy transient
+      // lines honor `notices: false`; the counts stay for the sidebar.
+      try {
+        patchUiState(paths.root, {
+          lastRecallCount: recallCount,
+          lastRecallAt: new Date().toISOString(),
+          notices: noticesEnabled(config),
+        });
+        if (noticesEnabled(config)) {
+          pushSessionLine(sessionId, `recalled ${recallCount} page(s) for this task`);
+        }
+      } catch {
+        /* UI state must never break the turn */
+      }
       const recallMessage = {
         role: "user",
         content: [{ type: "text", text: recallBlock }],

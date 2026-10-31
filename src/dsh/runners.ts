@@ -60,10 +60,12 @@ import {
   captureUrl,
 } from "../../extensions/llm-wiki/lib/source-packet.js";
 import {
+  autoRecallEnabled,
   noticesEnabled,
   parseModelRef,
   resolveWikilinkValidation,
   type TaskConfig,
+  trajectoriesEnabled,
 } from "../../extensions/llm-wiki/lib/task-config.js";
 import { buildPageBody, RESERVED_FRONTMATTER } from "../../extensions/llm-wiki/lib/tools.js";
 import {
@@ -688,7 +690,13 @@ export async function runLint(cwd: string, args: Record<string, unknown>): Promi
 
 // ─── wiki_status ────────────────────────────────────────
 
-export async function runStatus(cwd: string): Promise<WikiToolValue> {
+/** Shared vault-status payload for `wiki_status` text, details, and the
+ * WebUI sidebar panel (`/wiki/status.json`, G1/G3). Pure reader: no writes,
+ * no LLM calls. `ctx` is optional — without it `jobs` reports `unknown`. */
+export async function buildWikiStatusPayload(
+  cwd: string,
+  ctx?: DshContext,
+): Promise<{ lines: string[]; details: Record<string, unknown> }> {
   const paths = resolveVaultPaths(cwd);
   if (detectVaultFormat(paths.root) === "none") {
     fail({
@@ -707,6 +715,29 @@ export async function runStatus(cwd: string): Promise<WikiToolValue> {
   ).length;
   const gaps = readJson<{ gaps?: unknown[] }>(join(paths.discoveries, "gaps.json"), { gaps: [] });
   const health = status.totalPages === 0 ? "🔴 Empty" : orphanCount > 5 ? "⚠️ Warning" : "✅ Good";
+  // Host self-check (G3/C8): same keys feed the sidebar panel so a sick
+  // setup is diagnosable from either surface.
+  const taskConfig = configForVault(paths.root, paths.dotWiki);
+  const semantic = resolveEmbedder(taskConfig) ? "on" : "off";
+  // NOTE: reading an uninjected service off the cordis proxy THROWS (even
+  // behind `?.`), so probe it defensively — `unknown` means undetectable.
+  let jobs = "unknown";
+  try {
+    jobs = typeof ctx?.jobs?.start === "function" ? "available" : "missing";
+  } catch {
+    jobs = "unknown";
+  }
+  const capabilities = {
+    semantic,
+    jobs,
+    cwd: paths.root,
+    autoRecall: autoRecallEnabled(taskConfig),
+    trajectories: trajectoriesEnabled(taskConfig),
+    notices: noticesEnabled(taskConfig),
+    taskModel: taskConfig.taskModel
+      ? `${taskConfig.taskModel.provider}/${taskConfig.taskModel.id}`
+      : "(session model)",
+  };
   const diagLines =
     status.blockingDiagnostics.length > 0
       ? [
@@ -731,22 +762,34 @@ export async function runStatus(cwd: string): Promise<WikiToolValue> {
     `QMD documents: ${status.qmd.totalDocuments} (${status.qmd.canonicalDocuments} canonical, ${status.qmd.evidenceDocuments} evidence)`,
     `QMD embeddings pending: ${status.qmd.needsEmbedding}`,
     `QMD package: ${status.qmd.qmdVersion}`,
+    `Semantic: ${semantic}`,
+    `Jobs: ${jobs}`,
+    `Cwd: ${paths.root}`,
+    `AutoRecall: ${capabilities.autoRecall ? "on" : "off"} | Trajectories: ${capabilities.trajectories ? "on" : "off"} | Notices: ${capabilities.notices ? "on" : "off"}`,
+    `Synthesis model: ${capabilities.taskModel}`,
     ...diagLines,
   ];
+  const details: Record<string, unknown> = {
+    topic: config.topic,
+    mode: config.mode,
+    knowledgeFormat: status.knowledgeFormat,
+    totalPages: status.totalPages,
+    byType: status.byType,
+    orphans: orphanCount,
+    gaps: gaps.gaps?.length || 0,
+    health,
+    blockingDiagnostics: status.blockingDiagnostics,
+    qmd: status.qmd,
+    capabilities,
+  };
+  return { lines, details };
+}
+
+export async function runStatus(cwd: string, deps?: { ctx?: DshContext }): Promise<WikiToolValue> {
+  const { lines, details } = await buildWikiStatusPayload(cwd, deps?.ctx);
   return boundary({
     content: [{ type: "text", text: lines.join("\n") }],
-    details: {
-      topic: config.topic,
-      mode: config.mode,
-      knowledgeFormat: status.knowledgeFormat,
-      totalPages: status.totalPages,
-      byType: status.byType,
-      orphans: orphanCount,
-      gaps: gaps.gaps?.length || 0,
-      health,
-      blockingDiagnostics: status.blockingDiagnostics,
-      qmd: status.qmd,
-    },
+    details,
   });
 }
 

@@ -30,6 +30,16 @@ release cycle; the MCP server (`mcp/`) is kept as an alternative access path.
 Settings live in the Settings panel → **LLM Wiki** section (WebUI), with
 `/wiki-model` and `/wiki-trajectories` as command-line equivalents.
 Settings → Agent presets also lists **LLM Wiki synthesis** (child synthesis lane).
+
+> Settings ≠ status sidebar. The Settings section edits behavior; the
+> **sidebar status panel** (sidebar 🧠 icon → `main` page `wiki-status`)
+> shows live vault state. It reads `GET /wiki/status.json` from the Host
+> (`src/dsh/status-route.ts`, in-memory `WikiUiState` in `src/dsh/ui-state.ts`;
+> verified live HTTP 200 on web). Path A won — fallback B (session slot +
+> workspaceFiles) was not needed: the client bundle is web-only, and every
+> profile that serves the WebUI composes `webServer`. A transient
+> recall/background line also docks near the composer
+> (`conversation.composer.dock`); it renders nothing when `notices: false`.
 Pure queries are slash commands (`/wiki-status`, `/wiki-search`,
 `/wiki-recall`, `/wiki-lint`); work-initiating commands (`/wiki-bootstrap`,
 `/wiki-capture`, `/wiki-ingest`) queue a followup prompt so upstream
