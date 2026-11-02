@@ -3,10 +3,11 @@ import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /**
- * Host adapter for the two coding agents that can load this extension:
+ * Host adapter for the coding agents that can load this extension:
  *
  *  - **pi**   — `@earendil-works/pi-coding-agent`, config dir `.pi`
  *  - **omp**  — oh-my-pi (`@oh-my-pi/pi-coding-agent`), config dir `.omp`
+ *  - **dsh**  — DeepSeek Harness native plugin (`src/dsh/`), config dir `.dsh`
  *
  * omp rewrites `@earendil-works/pi-*` (and bare `typebox`) imports onto its own
  * bundled packages at load time (its `legacy-pi-compat.ts`), so the *module
@@ -28,10 +29,13 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
  * merges clean.
  */
 
-export type HostKind = "pi" | "omp";
+export type HostKind = "pi" | "omp" | "dsh";
 
 /** Project config directory name per host. */
-const CONFIG_DIR: Record<HostKind, string> = { pi: ".pi", omp: ".omp" };
+// DSH-PATCH (dsh-native plugin, H33): added the `dsh` branch so the DSH
+// entry resolves settings under `.dsh/` instead of silently inheriting
+// the pi default. Detection order below keeps pi/omp behavior unchanged.
+const CONFIG_DIR: Record<HostKind, string> = { pi: ".pi", omp: ".omp", dsh: ".dsh" };
 
 /** Settings file names inside a config directory, lowest → highest precedence. */
 const SETTINGS_FILES = ["settings.json", "config.yml", "config.yaml"] as const;
@@ -41,15 +45,18 @@ const SETTINGS_FILES = ["settings.json", "config.yml", "config.yaml"] as const;
  *
  * Ordered by reliability:
  *  1. `LLM_WIKI_HOST` — explicit escape hatch (tests, exotic embeddings).
+ *     Now also honors `"dsh"` (DSH-PATCH, H33).
  *  2. The agent directory path: pi resolves `~/.pi/agent`, omp `~/.omp/agent`.
  *     A `PI_CODING_AGENT_DIR` override that keeps the marker segment still
  *     classifies correctly; anything else falls through.
  *  3. `OMP_PROFILE`, which omp sets on itself whenever a profile is active.
- *  4. Default `pi` — the historical behaviour.
+ *  4. `DSH_PROFILE` / `DSH_PROFILE_DIR`, set in every shell call of a
+ *     profile-launched Harness (DSH-PATCH, H33).
+ *  5. Default `pi` — the historical behaviour.
  */
 export function detectHost(): HostKind {
   const forced = process.env.LLM_WIKI_HOST?.trim().toLowerCase();
-  if (forced === "omp" || forced === "pi") return forced;
+  if (forced === "omp" || forced === "pi" || forced === "dsh") return forced;
 
   let agentDir = "";
   try {
@@ -64,6 +71,7 @@ export function detectHost(): HostKind {
   }
 
   if (process.env.OMP_PROFILE) return "omp";
+  if (process.env.DSH_PROFILE || process.env.DSH_PROFILE_DIR) return "dsh";
   return "pi";
 }
 

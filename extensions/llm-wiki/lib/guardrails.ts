@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
 import { scheduleReindex } from "./indexing.js";
 import { rebuildMetadataLight } from "./metadata.js";
 import type { Runtime } from "./runtime.js";
@@ -10,6 +9,21 @@ import { inspectVaultFormat, isGeneratedOkfPath } from "./vault-format.js";
 /**
  * Guardrails and auto-rebuild hooks for the LLM Wiki extension.
  */
+
+/**
+ * Structural `toolName` check, equivalent to pi's `isToolCallEventType`.
+ *
+ * DSH-PATCH (dsh-native plugin): the value import from
+ * `@earendil-works/pi-coding-agent` is deliberately inlined so this module
+ * stays loadable in hosts that do not ship pi-coding-agent (the DSH entry
+ * reuses `extractMutationPaths`/`mutationBlockReason`/`hasWikiMutation`).
+ * Upstream implements it as `event.toolName === toolName`; the overloads
+ * there are type predicates, so the one narrowed `.input.path` read below
+ * is spelled with an explicit cast instead (same runtime behavior).
+ */
+function isToolCallEventType(toolName: string, event: { toolName?: string }): boolean {
+  return event.toolName === toolName;
+}
 
 let pendingRebuild = false;
 
@@ -223,7 +237,7 @@ export function installGuardrails(pi: ExtensionAPI, runtime?: Runtime): void {
   // Block direct edits to raw/ and meta/, plus OKF generated projections
   pi.on("tool_call", async (event) => {
     if (isToolCallEventType("write", event)) {
-      const path = event.input.path as string;
+      const path = (event.input as { path: string }).path;
       const paths = resolveVaultPaths(process.cwd());
       const reason = mutationBlockReason(path, paths);
       if (reason) return { block: true, reason };

@@ -1,0 +1,12 @@
+{
+  "meta": {
+    "title": "LLM Wiki",
+    "description": "Self-maintaining, Obsidian-compatible knowledge base: capture, ingest, recall, and trajectory memory."
+  },
+  "title": "LLM Wiki",
+  "subtitle": "Knowledge-base behavior for this profile.",
+  "save": "Save",
+  "discard": "Discard",
+  "close": "Close",
+  "unavailable": "Settings unavailable"
+}

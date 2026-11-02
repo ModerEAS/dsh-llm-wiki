@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist/dsh",
+    "rootDir": ".",
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/dsh/**/*.ts", "src/compat/**/*.ts", "extensions/llm-wiki/lib/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test", "src/dsh/client.js"]
+}

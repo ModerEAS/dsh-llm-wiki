@@ -63,6 +63,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "build:commands": "node scripts/build-commands.js",
+    "build:dsh": "node scripts/build-dsh.js",
     "build:mcp": "node scripts/build-mcp.js",
     "prepack": "node scripts/build-commands.js && node scripts/build-mcp.js",
     "typecheck": "tsc --noEmit",
@@ -123,6 +124,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
+    "@deepseek-ai/schemastery": "~3.18.5",
     "@modelcontextprotocol/server": "^2.1.0",
     "mdast-util-from-markdown": "^2.0.3",
     "node-html-markdown": "^2.0.0",
