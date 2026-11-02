@@ -778,6 +778,7 @@ export async function buildWikiStatusPayload(
     orphans: orphanCount,
     gaps: gaps.gaps?.length || 0,
     health,
+    lastUpdated: status.lastUpdated || "",
     blockingDiagnostics: status.blockingDiagnostics,
     qmd: status.qmd,
     capabilities,

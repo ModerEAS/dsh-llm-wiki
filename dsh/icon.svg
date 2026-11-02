@@ -1,6 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect x="4" y="4" width="56" height="56" rx="12" fill="#1f2937"/>
-  <path d="M20 46V18h4.5v24H36v4H20z" fill="#e5e7eb"/>
-  <path d="M32 14c8 0 14 6 14 14 0 5-2.6 9.3-6.5 11.7L44 46h-4.6l-3.6-5.2c-.6.1-1.2.2-1.8.2-3.2 0-6-1.6-7.7-4l3.9-2.3c1 1.5 2.4 2.3 3.8 2.3 3 0 5-2.7 5-6s-2-6-5-6c-1.2 0-2.3.4-3.2 1.2L26.5 24C28.2 15.9 32 14 32 14z" fill="#93c5fd"/>
-  <circle cx="46" cy="18" r="3" fill="#34d399"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="LLM Wiki">
+  <title>LLM Wiki</title>
+  <path d="M1.33 2h4a2.67 2.67 0 0 1 2.67 2.67v9.33a2 2 0 0 0-2-2H1.33z"/>
+  <path d="M14.67 2h-4a2.67 2.67 0 0 0-2.67 2.67v9.33a2 2 0 0 1 2-2h4.67z"/>
 </svg>

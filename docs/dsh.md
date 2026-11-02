@@ -32,7 +32,7 @@ Settings live in the Settings panel → **LLM Wiki** section (WebUI), with
 Settings → Agent presets also lists **LLM Wiki synthesis** (child synthesis lane).
 
 > Settings ≠ status sidebar. The Settings section edits behavior; the
-> **sidebar status panel** (sidebar 🧠 icon → `main` page `wiki-status`)
+> **sidebar status panel** (line-icon entry in `sidebar.panellist` → `main` page `wiki-status`)
 > shows live vault state. It reads `GET /wiki/status.json` from the Host
 > (`src/dsh/status-route.ts`, in-memory `WikiUiState` in `src/dsh/ui-state.ts`;
 > verified live HTTP 200 on web). Path A won — fallback B (session slot +

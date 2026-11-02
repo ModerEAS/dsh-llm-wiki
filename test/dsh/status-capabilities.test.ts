@@ -37,6 +37,7 @@ describe("runStatus capabilities (G3/C8)", () => {
     expect(cap.trajectories).toBe(false);
     expect(cap.notices).toBe(true);
     expect(cap.taskModel).toBe("(session model)");
+    expect(details.lastUpdated).toEqual(expect.any(String));
     const text = lines.join("\n");
     for (const needle of ["Semantic:", "Jobs:", "Cwd:", "AutoRecall:", "Synthesis model:"]) {
       expect(text).toContain(needle);
@@ -50,14 +51,11 @@ describe("runStatus capabilities (G3/C8)", () => {
     const noStart = await buildWikiStatusPayload(root, { jobs: {} } as unknown as DshContext);
     expect((noStart.details.capabilities as Record<string, unknown>).jobs).toBe("missing");
     // An uninjected `jobs` service reads as a proxy throw → `unknown`.
-    const throwing = await buildWikiStatusPayload(
-      root,
-      {
-        get jobs(): unknown {
-          throw new Error('cannot get property "jobs" without inject');
-        },
-      } as unknown as DshContext,
-    );
+    const throwing = await buildWikiStatusPayload(root, {
+      get jobs(): unknown {
+        throw new Error('cannot get property "jobs" without inject');
+      },
+    } as unknown as DshContext);
     expect((throwing.details.capabilities as Record<string, unknown>).jobs).toBe("unknown");
     const bare = await buildWikiStatusPayload(root);
     expect((bare.details.capabilities as Record<string, unknown>).jobs).toBe("missing");
