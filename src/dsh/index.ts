@@ -122,9 +122,8 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
   // proxy. Discover it via inject() like settings-ui.ts does; headless
   // profiles (no webServer) simply never fire the callback (fallback B).
   try {
-    const inject = (
-      ctx as { inject?: (deps: string[], fn: (c: DshContext) => void) => void }
-    ).inject;
+    const inject = (ctx as { inject?: (deps: string[], fn: (c: DshContext) => void) => void })
+      .inject;
     if (typeof inject === "function") {
       inject(["webServer"], (scoped) => {
         try {
@@ -198,6 +197,8 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
             try {
               patchUiState(resolveVaultPaths(cwd).root, {
                 setupMessage: `Personal wiki layout fixed: flattened ${migration.moved.length} entries.`,
+                setupCode: "notice.layoutFixed",
+                setupParams: { count: migration.moved.length },
               });
             } catch {
               /* UI state must never break the agent */
@@ -243,6 +244,7 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
               patchUiState(paths.root, {
                 loaded: true,
                 setupMessage: "Wiki created (topic pending).",
+                setupCode: "notice.created",
               });
             } catch {
               /* UI state must never break the agent */
@@ -250,7 +252,10 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
           } else {
             logger.warn(`auto-bootstrap blocked at ${paths.root}`);
             try {
-              patchUiState(paths.root, { setupMessage: "Wiki setup blocked (bootstrap)." });
+              patchUiState(paths.root, {
+                setupMessage: "Wiki setup blocked (bootstrap).",
+                setupCode: "notice.blocked",
+              });
             } catch {
               /* UI state must never break the agent */
             }
@@ -258,7 +263,10 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
         } catch (error) {
           logger.warn(`auto-bootstrap failed: ${(error as Error).message}`);
           try {
-            patchUiState(paths.root, { setupMessage: "Wiki setup blocked (bootstrap)." });
+            patchUiState(paths.root, {
+              setupMessage: "Wiki setup blocked (bootstrap).",
+              setupCode: "notice.blocked",
+            });
           } catch {
             /* UI state must never break the agent */
           }

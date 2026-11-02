@@ -208,7 +208,10 @@ export function installPreStepListener(
           notices: noticesEnabled(config),
         });
         if (noticesEnabled(config)) {
-          pushSessionLine(sessionId, `recalled ${recallCount} page(s) for this task`);
+          pushSessionLine(sessionId, `recalled ${recallCount} page(s) for this task`, {
+            code: "dock.recalled",
+            params: { count: recallCount },
+          });
         }
       } catch {
         /* UI state must never break the turn */

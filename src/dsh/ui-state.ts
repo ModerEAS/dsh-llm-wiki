@@ -30,6 +30,9 @@ export interface WikiUiSnapshot {
   lastRecallCount: number | null;
   lastRecallAt: string | null;
   setupMessage: string | null;
+  /** `llm-wiki` locale key. The client translates it; `setupMessage` is the English fallback. */
+  setupCode: string | null;
+  setupParams: Record<string, string | number> | null;
   lastBackground: string | null;
   background: BackgroundJobState[];
   notices: boolean;
@@ -37,8 +40,12 @@ export interface WikiUiSnapshot {
 }
 
 export interface SessionLine {
+  /** English fallback. Shown when `code` is absent or the locale dictionary has no entry. */
   text: string;
   at: string;
+  /** `llm-wiki` locale key. The WebUI dock translates this through `ctx.locale`. */
+  code?: string;
+  params?: Record<string, string | number>;
 }
 
 const EMPTY_SNAPSHOT: WikiUiSnapshot = {
@@ -50,6 +57,8 @@ const EMPTY_SNAPSHOT: WikiUiSnapshot = {
   lastRecallCount: null,
   lastRecallAt: null,
   setupMessage: null,
+  setupCode: null,
+  setupParams: null,
   lastBackground: null,
   background: [],
   notices: true,
@@ -119,10 +128,17 @@ export function knownVaults(): string[] {
 }
 
 /** Append a transient per-session line for the composer dock (G2). */
-export function pushSessionLine(sessionId: string, text: string): SessionLine[] {
+export function pushSessionLine(
+  sessionId: string,
+  text: string,
+  i18n?: { code?: string; params?: Record<string, string | number> },
+): SessionLine[] {
   if (!sessionId || !text) return [];
   const lines = sessionLines.get(sessionId) ?? [];
-  lines.push({ text, at: now() });
+  const line: SessionLine = { text, at: now() };
+  if (i18n?.code) line.code = i18n.code;
+  if (i18n?.params) line.params = i18n.params;
+  lines.push(line);
   const capped = lines.slice(-MAX_SESSION_LINES);
   sessionLines.set(sessionId, capped);
   return capped;

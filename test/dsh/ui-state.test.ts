@@ -53,6 +53,18 @@ describe("ui-state (G4)", () => {
     expect(getUiSnapshot("/v").background).toHaveLength(10);
   });
 
+  it("keeps a locale code beside the English dock fallback", () => {
+    resetUiState();
+    pushSessionLine("s1", "recalled 2 page(s) for this task", {
+      code: "dock.recalled",
+      params: { count: 2 },
+    });
+    const line = getSessionLines("s1")[0];
+    expect(line.text).toBe("recalled 2 page(s) for this task");
+    expect(line.code).toBe("dock.recalled");
+    expect(line.params).toEqual({ count: 2 });
+  });
+
   it("ignores empty keys and resets", () => {
     resetUiState();
     patchUiState("/v", { loaded: true });

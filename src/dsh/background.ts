@@ -268,7 +268,12 @@ export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRunti
               background: { label: opts.label, phase: "running", at: new Date().toISOString() },
             });
           }
-          if (sessionId) pushSessionLine(sessionId, `background ${opts.label} started`);
+          if (sessionId) {
+            pushSessionLine(sessionId, `background ${opts.label} started`, {
+              code: "dock.backgroundStarted",
+              params: { label: opts.label },
+            });
+          }
         } catch {
           /* UI state must never break background work */
         }
@@ -326,7 +331,12 @@ export function createDshRuntime(ctx: DshContext, logger?: WikiLogger): DshRunti
               },
             });
           }
-          if (sessionId) pushSessionLine(sessionId, `background ${opts.label} failed`);
+          if (sessionId) {
+            pushSessionLine(sessionId, `background ${opts.label} failed`, {
+              code: "dock.backgroundFailed",
+              params: { label: opts.label },
+            });
+          }
         } catch {
           /* UI state must never break background work */
         }

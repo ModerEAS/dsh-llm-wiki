@@ -15,10 +15,19 @@
  *   panellist glyph is an inline 1px stroke icon (same weight as the host
  *   clock / plugin glyphs), also used in the panel header.
  *
- * DRAFT: assembled from the researched configForms/whileServed/slots
- * contract; NOT yet verified against a live Harness. If `configForms` or
- * the `settings.section` slot is absent, apply() no-ops and settings remain
- * editable via /wiki-model, /wiki-trajectories, and settings files.
+ * Locale is the DeepSeek Harness split:
+ * - Plugin-list title/description are `meta.*` in `locale/{en,zh}.json`.
+ *   `readPluginMeta` reads those fields and ignores every other key.
+ * - The rest of those JSON files mirrors the screen dictionary for the host
+ *   bundle. The browser module table cannot require them, so the same keys
+ *   are inlined in `STRINGS` and registered with `ctx.locale`.
+ * - Slot entries set `locale: "llm-wiki"` and render with the framework `t`
+ *   seat. Do not pass `t` from `inject()` — that spread replaces the seat.
+ *
+ * DRAFT: assembled from the researched configForms/slots contract; NOT yet
+ * verified against a live Harness. If `configForms` or the `settings.section`
+ * slot is absent, apply() no-ops and settings remain editable via
+ * /wiki-model, /wiki-trajectories, and settings files.
  */
 window.__ModuleLoader__.load({
   id: "dsh-llm-wiki",
@@ -28,13 +37,14 @@ window.__ModuleLoader__.load({
     const NS = "llm-wiki";
     const ENTRY = "llm-wiki";
 
-    // Locale dictionaries live inline: the browser module table only
-    // serves baseline keys, so JSON files are not requireable here.
-    // `dsh/locale/*.json` mirrors these strings for the host bundle.
+    // UI_DICTIONARY_START
+    // Inline because the browser module table cannot require locale JSON.
+    // `dsh/locale/*.json` mirrors these strings; keep the two in lockstep.
     const STRINGS = {
       en: {
         "meta.title": "LLM Wiki",
-        "meta.description": "Self-maintaining, Obsidian-compatible knowledge base.",
+        "meta.description":
+          "Self-maintaining, Obsidian-compatible knowledge base: capture, ingest, recall, and trajectory memory.",
         title: "LLM Wiki",
         subtitle: "Knowledge-base behavior for this profile.",
         save: "Save",
@@ -105,10 +115,33 @@ window.__ModuleLoader__.load({
         "panel.qmd.recovering": "Recovering",
         "panel.qmd.missing": "Missing",
         "panel.qmd.error": "Error",
+        "panel.mode.personal": "personal",
+        "panel.mode.company": "company",
+        overridden: " · overridden",
+        "field.autoRecall.label": "Automatic recall",
+        "field.autoRecall.hint": "Inject relevant wiki pages before each turn.",
+        "field.notices.label": "UI notices",
+        "field.notices.hint": "Show recall hits, reminders, and background reports.",
+        "field.trajectories.label": "Agent trajectories",
+        "field.trajectories.hint": "Opt-in working memory: capture, distill, and recall skills.",
+        "field.taskModel.label": "Synthesis model",
+        "field.taskModel.hint": "'provider/id'. Empty = session model.",
+        "field.semanticWeight.label": "Semantic weight",
+        "field.semanticWeight.hint": "0 = pure lexical recall.",
+        "field.recallLinksThreshold.label": "Links-first threshold",
+        "field.recallLinksThreshold.hint": "Page count above which recall returns links.",
+        "field.ambientPersonalVault.label": "Ambient personal vault",
+        "field.ambientPersonalVault.hint": "Recall from the personal vault outside projects.",
+        "notice.layoutFixed": "Personal wiki layout fixed: flattened {count} entries.",
+        "notice.created": "Wiki created (topic pending).",
+        "notice.blocked": "Wiki setup blocked (bootstrap).",
+        "dock.backgroundStarted": "background {label} started",
+        "dock.backgroundFailed": "background {label} failed",
+        "dock.recalled": "recalled {count} page(s) for this task",
       },
       zh: {
         "meta.title": "LLM Wiki",
-        "meta.description": "自维护、兼容 Obsidian 的知识库。",
+        "meta.description": "自维护、兼容 Obsidian 的知识库：采集、入库、召回与轨迹记忆。",
         title: "LLM Wiki",
         subtitle: "此配置文件的知识库行为。",
         save: "保存",
@@ -179,8 +212,32 @@ window.__ModuleLoader__.load({
         "panel.qmd.recovering": "恢复中",
         "panel.qmd.missing": "缺失",
         "panel.qmd.error": "错误",
+        "panel.mode.personal": "个人",
+        "panel.mode.company": "公司",
+        overridden: " · 已修改",
+        "field.autoRecall.label": "自动召回",
+        "field.autoRecall.hint": "每轮开始前注入相关知识库页面。",
+        "field.notices.label": "界面提示",
+        "field.notices.hint": "显示召回命中、提醒和后台报告。",
+        "field.trajectories.label": "智能体轨迹",
+        "field.trajectories.hint": "可选的工作记忆：采集、提炼与召回技能。",
+        "field.taskModel.label": "合成模型",
+        "field.taskModel.hint": "“provider/id”。留空则使用当前会话模型。",
+        "field.semanticWeight.label": "语义权重",
+        "field.semanticWeight.hint": "0 表示纯词法召回。",
+        "field.recallLinksThreshold.label": "链接优先阈值",
+        "field.recallLinksThreshold.hint": "页面数超过该值后，召回只返回链接。",
+        "field.ambientPersonalVault.label": "个人库常驻",
+        "field.ambientPersonalVault.hint": "在项目之外也从个人知识库召回。",
+        "notice.layoutFixed": "个人知识库目录已展平，整理了 {count} 项。",
+        "notice.created": "知识库已创建（主题待定）。",
+        "notice.blocked": "知识库初始化被阻止。",
+        "dock.backgroundStarted": "后台 {label} 已开始",
+        "dock.backgroundFailed": "后台 {label} 失败",
+        "dock.recalled": "已为本轮任务召回 {count} 页",
       },
     };
+    // UI_DICTIONARY_END
 
     const PANEL_ID = "wiki-status";
     // Open book, 16px box, 1px round stroke — same weight as
@@ -540,57 +597,72 @@ window.__ModuleLoader__.load({
     const FIELDS = [
       {
         key: "autoRecall",
-        label: "Automatic recall",
+        labelKey: "field.autoRecall.label",
+        hintKey: "field.autoRecall.hint",
         type: "boolean",
-        hint: "Inject relevant wiki pages before each turn.",
       },
       {
         key: "notices",
-        label: "UI notices",
+        labelKey: "field.notices.label",
+        hintKey: "field.notices.hint",
         type: "boolean",
-        hint: "Show recall hits, reminders, and background reports.",
       },
       {
         key: "trajectories",
-        label: "Agent trajectories",
+        labelKey: "field.trajectories.label",
+        hintKey: "field.trajectories.hint",
         type: "boolean",
-        hint: "Opt-in working memory: capture, distill, and recall skills.",
       },
       {
         key: "taskModel",
-        label: "Synthesis model",
+        labelKey: "field.taskModel.label",
+        hintKey: "field.taskModel.hint",
         type: "string",
-        hint: "'provider/id'. Empty = session model.",
       },
       {
         key: "semanticWeight",
-        label: "Semantic weight",
+        labelKey: "field.semanticWeight.label",
+        hintKey: "field.semanticWeight.hint",
         type: "number",
-        hint: "0 = pure lexical recall.",
       },
       {
         key: "recallLinksThreshold",
-        label: "Links-first threshold",
+        labelKey: "field.recallLinksThreshold.label",
+        hintKey: "field.recallLinksThreshold.hint",
         type: "number",
-        hint: "Page count above which recall returns links.",
       },
       {
         key: "ambientPersonalVault",
-        label: "Ambient personal vault",
+        labelKey: "field.ambientPersonalVault.label",
+        hintKey: "field.ambientPersonalVault.hint",
         type: "boolean",
-        hint: "Recall from the personal vault outside projects.",
       },
     ];
 
-    function tr(t, key, fallback) {
-      if (typeof t !== "function") return fallback;
-      try {
-        const value = t(key);
-        if (typeof value === "string" && value && value !== key) return value;
-      } catch (_) {
-        /* missing catalog key — use the English fallback */
+    function fill(template, params) {
+      if (!params || typeof params !== "object") return template;
+      return template.replace(/\{(\w+)\}/g, (match, name) =>
+        Object.hasOwn(params, name) ? String(params[name]) : match,
+      );
+    }
+
+    // `fallback` is the English sentence used when the catalog misses the key
+    // (the status panel passes one so a `t` that echoes keys still renders).
+    // A params object may be the third argument, or the fourth when a fallback
+    // string is present. `{name}` is filled here if `t` returns the template.
+    function tr(t, key, fallback, params) {
+      const vars = fallback && typeof fallback === "object" ? fallback : params;
+      const fallbackText = typeof fallback === "string" ? fallback : STRINGS.en[key] || key;
+      let template = fallbackText;
+      if (typeof t === "function") {
+        try {
+          const value = vars ? t(key, vars) : t(key);
+          if (typeof value === "string" && value && value !== key) template = value;
+        } catch (_) {
+          /* missing catalog key — use the English fallback */
+        }
       }
-      return fallback;
+      return fill(template, vars);
     }
 
     function useForm(scope) {
@@ -884,7 +956,11 @@ window.__ModuleLoader__.load({
       const health = healthPresentation(st.health, t);
       const never = tr(t, "panel.never", "Never");
       const topic = shown(st.topic, tr(t, "panel.unknownTopic", "Unknown"));
-      const mode = shown(st.mode, "personal");
+      const modeValue = st.mode || "personal";
+      const mode =
+        modeValue === "personal" || modeValue === "company"
+          ? tr(t, `panel.mode.${modeValue}`, modeValue)
+          : shown(modeValue, tr(t, "panel.mode.personal", "personal"));
       const format = st.knowledgeFormat ? String(st.knowledgeFormat) : "";
       return h(
         Card,
@@ -1051,8 +1127,11 @@ window.__ModuleLoader__.load({
       const cap = st.capabilities || {};
       const dash = data.dashboard || {};
       const ui = data.ui || {};
+      const rawModel = ui.modelLabel || cap.taskModel || "";
       const model =
-        ui.modelLabel || cap.taskModel || tr(t, "panel.sessionModel", "(session model)");
+        !rawModel || rawModel === "(session model)"
+          ? tr(t, "panel.sessionModel", "(session model)")
+          : String(rawModel);
       const kinds = kindSummary(dash.last7dByKind);
       const rows = [
         { key: "model", label: tr(t, "panel.field.runtimeModel", "Model"), value: String(model) },
@@ -1110,6 +1189,14 @@ window.__ModuleLoader__.load({
         });
       }
       const jobs = Array.isArray(ui.background) ? ui.background : [];
+      const notice = ui.setupCode
+        ? tr(
+            t,
+            ui.setupCode,
+            ui.setupMessage || STRINGS.en[ui.setupCode] || "",
+            ui.setupParams || undefined,
+          )
+        : ui.setupMessage;
       return h(
         Card,
         { title: tr(t, "panel.section.activity", "Activity") },
@@ -1135,12 +1222,12 @@ window.__ModuleLoader__.load({
               ),
             )
           : null,
-        ui.setupMessage
+        notice
           ? h(
               "div",
               { className: "lwiki-note" },
               h("div", { className: "lwiki-kicker" }, tr(t, "panel.field.notice", "Notice")),
-              String(ui.setupMessage),
+              String(notice),
             )
           : null,
       );
@@ -1278,7 +1365,7 @@ window.__ModuleLoader__.load({
             .then((data) => {
               if (cancelled) return;
               const lines = data?.transient || [];
-              setLine(lines.length ? lines[lines.length - 1].text : null);
+              setLine(lines.length ? lines[lines.length - 1] : null);
             })
             .catch(() => {
               if (!cancelled) setLine(null);
@@ -1292,6 +1379,13 @@ window.__ModuleLoader__.load({
         };
       }, [url]);
       if (!line) return null;
+      const text =
+        typeof line === "string"
+          ? line
+          : line.code
+            ? tr(props?.t, line.code, line.text || STRINGS.en[line.code] || "", line.params)
+            : line.text;
+      if (!text) return null;
       return h(
         "div",
         {
@@ -1305,7 +1399,7 @@ window.__ModuleLoader__.load({
           },
         },
         h(WikiMark, { size: 14 }),
-        h("span", { style: { minWidth: 0, overflowWrap: "anywhere" } }, line),
+        h("span", { style: { minWidth: 0, overflowWrap: "anywhere" } }, text),
       );
     }
 
@@ -1313,7 +1407,6 @@ window.__ModuleLoader__.load({
       const { close, scope, t } = props;
       const snap = useForm(scope);
       const [draft, setDraft] = React.useState(null);
-      const value = (draft ?? snap.value) || {};
       const dirty = draft !== null;
 
       const save = async () => {
@@ -1327,25 +1420,32 @@ window.__ModuleLoader__.load({
       };
 
       if (!snap || snap.status === "unavailable") {
-        return h("div", { style: { padding: 24 } }, t ? t("unavailable") : "Settings unavailable");
+        return h("div", { style: { padding: 24 } }, tr(t, "unavailable", "Settings unavailable"));
       }
+      const value = (draft ?? snap.value) || {};
 
       return h(
         "div",
         { style: { padding: 24, display: "grid", gap: 16, maxWidth: 640 } },
-        h("h2", { style: { margin: 0, fontSize: 18 } }, t ? t("title") : "LLM Wiki"),
+        h("h2", { style: { margin: 0, fontSize: 18 } }, tr(t, "title", "LLM Wiki")),
         h(
           "p",
           { style: { margin: 0, color: "var(--dsw-alias-text-secondary, #888)" } },
-          t ? t("subtitle") : "Knowledge-base behavior for this profile.",
+          tr(t, "subtitle", "Knowledge-base behavior for this profile."),
         ),
         ...FIELDS.map((field) => {
           const current = value[field.key];
           const isDirty = dirty && field.key in draft;
+          const hint = tr(t, field.hintKey, STRINGS.en[field.hintKey]);
           return h(
             "label",
             { key: field.key, style: { display: "grid", gap: 4 } },
-            h("span", null, field.label, isDirty ? " ·overridden" : ""),
+            h(
+              "span",
+              null,
+              tr(t, field.labelKey, STRINGS.en[field.labelKey]),
+              isDirty ? tr(t, "overridden", STRINGS.en.overridden) : "",
+            ),
             field.type === "boolean"
               ? h("input", {
                   type: "checkbox",
@@ -1359,7 +1459,7 @@ window.__ModuleLoader__.load({
                   value: String(current ?? ""),
                   disabled: !snap.writable,
                   inputMode: field.type === "number" ? "numeric" : undefined,
-                  placeholder: field.hint,
+                  placeholder: hint,
                   onChange: (e) =>
                     setDraft({
                       ...(draft || {}),
@@ -1367,23 +1467,19 @@ window.__ModuleLoader__.load({
                         field.type === "number" ? Number(e.target.value) : e.target.value,
                     }),
                 }),
-            h("small", { style: { color: "var(--dsw-alias-text-secondary, #888)" } }, field.hint),
+            h("small", { style: { color: "var(--dsw-alias-text-secondary, #888)" } }, hint),
           );
         }),
         h(
           "div",
           { style: { display: "flex", gap: 8 } },
-          h(
-            "button",
-            { disabled: !snap.writable || !dirty, onClick: save },
-            t ? t("save") : "Save",
-          ),
+          h("button", { disabled: !snap.writable || !dirty, onClick: save }, tr(t, "save", "Save")),
           h(
             "button",
             { disabled: !dirty, onClick: () => setDraft(null) },
-            t ? t("discard") : "Discard",
+            tr(t, "discard", "Discard"),
           ),
-          h("button", { onClick: close }, t ? t("close") : "Close"),
+          h("button", { onClick: close }, tr(t, "close", "Close")),
         ),
       );
     }
@@ -1392,11 +1488,20 @@ window.__ModuleLoader__.load({
       inject: ["slots", "locale", "configForms"],
       apply(ctx) {
         const disposers = [];
+        const cleanup = () => {
+          for (const dispose of disposers.splice(0)) {
+            try {
+              if (typeof dispose === "function") dispose();
+            } catch (_) {
+              /* best effort */
+            }
+          }
+        };
         try {
           try {
             ctx.logger?.info?.("[llm-wiki] client apply: registering settings.section");
           } catch (_) {}
-          const t = ctx.locale?.bind ? ctx.locale.bind(NS) : null;
+          const bound = ctx.locale?.bind ? ctx.locale.bind(NS) : null;
           if (ctx.locale?.register) {
             disposers.push(
               ctx.effect(() => ctx.locale.register(NS, STRINGS), "wiki-ui: dictionaries"),
@@ -1411,13 +1516,13 @@ window.__ModuleLoader__.load({
             try {
               ctx.logger?.warn?.("[llm-wiki] settings UI skipped: slots unavailable");
             } catch (_) {}
-            return () => {};
+            return cleanup;
           }
           if (!ctx.configForms?.get) {
             try {
               ctx.logger?.warn?.("[llm-wiki] settings UI skipped: configForms unavailable");
             } catch (_) {}
-            return () => {};
+            return cleanup;
           }
           const scope = ctx.configForms.get(ENTRY);
           disposers.push(
@@ -1429,9 +1534,9 @@ window.__ModuleLoader__.load({
                       name: "settings.section",
                       id: "wiki",
                       order: 60,
-                      label: () => (t ? t("title") : "LLM Wiki"),
+                      label: () => tr(bound, "title", "LLM Wiki"),
                       locale: NS,
-                      inject: () => ({ scope, t }),
+                      inject: () => ({ scope }),
                     },
                     WikiSection,
                   ),
@@ -1451,7 +1556,7 @@ window.__ModuleLoader__.load({
                       name: "sidebar.panellist",
                       id: PANEL_ID,
                       order: 40,
-                      label: () => (t ? t("title") : "LLM Wiki"),
+                      label: () => tr(bound, "title", "LLM Wiki"),
                       locale: NS,
                       inject: () => ({}),
                     },
@@ -1469,9 +1574,9 @@ window.__ModuleLoader__.load({
                     {
                       name: "main",
                       key: PANEL_ID,
-                      label: () => (t ? t("title") : "LLM Wiki"),
+                      label: () => tr(bound, "title", "LLM Wiki"),
                       locale: NS,
-                      inject: () => ({ scope, t }),
+                      inject: () => ({ scope }),
                     },
                     WikiStatusPanel,
                   ),
@@ -1506,15 +1611,7 @@ window.__ModuleLoader__.load({
             /* best effort */
           }
         }
-        return () => {
-          for (const dispose of disposers.splice(0)) {
-            try {
-              if (typeof dispose === "function") dispose();
-            } catch (_) {
-              /* best effort */
-            }
-          }
-        };
+        return cleanup;
       },
     };
   },
