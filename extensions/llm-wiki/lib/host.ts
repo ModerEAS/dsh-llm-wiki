@@ -85,9 +85,12 @@ export function detectHost(): HostKind {
  * `settings.json`, matching omp's own project-settings precedence.
  */
 export function listProjectSettingsFiles(cwd: string, host: HostKind = detectHost()): string[] {
-  const foreign: HostKind = host === "omp" ? "pi" : "omp";
+  // Every non-native layout is read (lowest precedence first) so a vault
+  // configured under one host keeps its settings after another takes over.
+  // `dsh` therefore reads BOTH `.pi` and `.omp`, not just `.omp`.
+  const kinds = (Object.keys(CONFIG_DIR) as HostKind[]).filter((kind) => kind !== host);
   const files: string[] = [];
-  for (const kind of [foreign, host]) {
+  for (const kind of [...kinds, host]) {
     const dir = join(cwd, CONFIG_DIR[kind]);
     for (const name of SETTINGS_FILES) files.push(join(dir, name));
   }
@@ -126,8 +129,12 @@ export function resolveProjectSettingsPath(cwd: string, host: HostKind = detectH
   const native = join(cwd, CONFIG_DIR[host]);
   if (existsSync(native)) return join(native, "settings.json");
 
-  const foreign = join(cwd, CONFIG_DIR[host === "omp" ? "pi" : "omp"]);
-  if (existsSync(foreign)) return join(foreign, "settings.json");
+  // Same foreign order as listProjectSettingsFiles: a repo already configured
+  // under any other host keeps a single settings file (`dsh` prefers `.pi`).
+  for (const kind of (Object.keys(CONFIG_DIR) as HostKind[]).filter((k) => k !== host)) {
+    const dir = join(cwd, CONFIG_DIR[kind]);
+    if (existsSync(dir)) return join(dir, "settings.json");
+  }
 
   return join(native, "settings.json");
 }

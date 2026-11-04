@@ -99,6 +99,15 @@ describe("settings file discovery", () => {
     expect([...underOmp].sort()).toEqual([...underPi].sort());
   });
 
+  it("reads every foreign layout under dsh, including .pi", () => {
+    // Regression: dsh used to treat omp as its only foreign layout, so a
+    // `.pi/settings.json` written by the pi extension was invisible.
+    const underDsh = listProjectSettingsFiles(tmpDir, "dsh");
+    expect(underDsh).toContain(join(tmpDir, ".pi", "settings.json"));
+    expect(underDsh).toContain(join(tmpDir, ".omp", "settings.json"));
+    expect(underDsh.at(-1)).toBe(join(tmpDir, ".dsh", "config.yaml"));
+  });
+
   it("resolves user-level files under the host's agent directory", () => {
     const agentHome = join(tmpDir, "agent-home");
     expect(listGlobalSettingsFiles()).toEqual([
@@ -133,6 +142,15 @@ describe("loadTaskConfig across hosts", () => {
     const cfg = loadTaskConfig(tmpDir);
     expect(cfg.synthesisLanguage).toBe("ru");
     expect(cfg.notices).toBe(false);
+  });
+
+  it("keeps reading a pi-configured repo under dsh", () => {
+    process.env.LLM_WIKI_HOST = "dsh";
+    writeSettings(".pi", "settings.json", JSON.stringify({ "llm-wiki": { autoRecall: false } }));
+    expect(loadTaskConfig(tmpDir).autoRecall).toBe(false);
+    // And the native .dsh file still wins over it.
+    writeSettings(".dsh", "settings.json", JSON.stringify({ "llm-wiki": { autoRecall: true } }));
+    expect(loadTaskConfig(tmpDir).autoRecall).toBe(true);
   });
 
   it("keeps reading a pi-configured repo after oh-my-pi takes over", () => {

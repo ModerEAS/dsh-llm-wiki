@@ -48,6 +48,16 @@ export interface PreStepDecision {
   startsRequestSeries?: boolean;
 }
 
+/** Loader entry (`ctx.loader.entries()`); `config` holds EXPLICIT row values only. */
+export interface DshLoaderEntry {
+  options?: {
+    id?: string;
+    name?: string;
+    config?: unknown;
+  };
+  [key: string]: unknown;
+}
+
 export interface DshContext {
   tools?: {
     register?: (definition: DshToolDefinition) => unknown;
@@ -137,6 +147,10 @@ export interface DshContext {
   tokenMeter?: {
     estimateMessage?: (message: unknown) => number;
     pressure?: (...args: unknown[]) => unknown;
+  };
+  /** Cordis loader service (`inject: "loader"`): source of the row config. */
+  loader?: {
+    entries?: () => DshLoaderEntry[];
   };
   on?: (event: string, listener: (...args: never[]) => unknown) => () => void;
   effect?: (fn: () => unknown, label?: string) => () => void;

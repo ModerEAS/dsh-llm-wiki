@@ -160,6 +160,26 @@ export interface TaskConfig {
   trajectories?: boolean;
 
   /**
+   * Render the plugin-owned proactive-capture policy in the static system
+   * prompt (DSH). Default `true`; only an explicit `false` removes the block.
+   * The text is byte-stable, so it never breaks the provider prompt cache.
+   */
+  proactiveCapture?: boolean;
+
+  /**
+   * Periodic "record what you learned" reminder (DSH port of pi's
+   * `registerObservationReminder`). Default `true`; `false` disables it
+   * entirely for this vault/profile.
+   */
+  observationReminder?: boolean;
+
+  /**
+   * Turns between observation reminders. Default 5; clamped to an integer
+   * >= 1. Only read while {@link TaskConfig.observationReminder} is on.
+   */
+  reminderTurns?: number;
+
+  /**
    * Language for background ingest synthesis narrative content (issue #124).
    * BCP 47 language tag (e.g. "ru", "fr"). When unset, synthesis defaults to
    * English. Applies to titles, summaries, takeaways, descriptions, etc.; raw
@@ -256,6 +276,31 @@ export function trajectoriesEnabled(config: TaskConfig | undefined): boolean {
   return config?.trajectories === true;
 }
 
+/**
+ * Resolve whether the static proactive-capture policy block is rendered.
+ * Defaults to `true`; only an explicit `proactiveCapture: false` removes it.
+ */
+export function proactiveCaptureEnabled(config: TaskConfig | undefined): boolean {
+  return config?.proactiveCapture !== false;
+}
+
+/**
+ * Resolve whether the periodic observation reminder fires. Defaults to
+ * `true`; only an explicit `observationReminder: false` disables it.
+ */
+export function observationReminderEnabled(config: TaskConfig | undefined): boolean {
+  return config?.observationReminder !== false;
+}
+
+/** Turns between reminders: default 5, never below 1, always an integer. */
+export const DEFAULT_REMINDER_TURNS = 5;
+
+export function resolveReminderTurns(config: TaskConfig | undefined): number {
+  const turns = config?.reminderTurns;
+  if (typeof turns !== "number" || !Number.isFinite(turns)) return DEFAULT_REMINDER_TURNS;
+  return Math.max(1, Math.floor(turns));
+}
+
 const SETTINGS_KEY = "llm-wiki";
 
 function readModelSpec(value: unknown): { provider: string; id: string } | undefined {
@@ -324,6 +369,19 @@ function readNamespacedConfig(path: string): Partial<TaskConfig> {
 
     if (typeof section.trajectories === "boolean") {
       out.trajectories = section.trajectories;
+    }
+
+    if (typeof section.proactiveCapture === "boolean") {
+      out.proactiveCapture = section.proactiveCapture;
+    }
+
+    if (typeof section.observationReminder === "boolean") {
+      out.observationReminder = section.observationReminder;
+    }
+
+    const reminderTurns = section.reminderTurns;
+    if (typeof reminderTurns === "number" && Number.isFinite(reminderTurns)) {
+      out.reminderTurns = Math.max(1, Math.floor(reminderTurns));
     }
 
     const lang = section.synthesisLanguage;
@@ -543,6 +601,9 @@ const KNOWN_KEYS = [
   "autoRecall",
   "ambientPersonalVault",
   "trajectories",
+  "proactiveCapture",
+  "observationReminder",
+  "reminderTurns",
   "synthesisLanguage",
   "synthesisMaxTokens",
   "wikilinkValidation",

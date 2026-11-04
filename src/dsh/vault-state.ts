@@ -16,7 +16,11 @@
  * a lockfile.
  */
 import type { TaskConfig } from "../../extensions/llm-wiki/lib/task-config.js";
-import { loadTaskConfig } from "../../extensions/llm-wiki/lib/task-config.js";
+import { loadTaskConfig, parseModelRef } from "../../extensions/llm-wiki/lib/task-config.js";
+import type { DshContext } from "./types.js";
+
+/** Plugin row id in the profile's `cordis.patch.yml`. */
+const ROW_ID = "llm-wiki";
 
 /** Vault roots with a metadata rebuild owed (set by the guard layer). */
 const pendingRebuilds = new Set<string>();
@@ -38,13 +42,85 @@ export function pendingRebuildCount(): number {
 /** Per-vault config cache: read explicitly by key, never one shared field. */
 const configCache = new Map<string, { config: TaskConfig; mtimeMs: number }>();
 
+/**
+ * Profile-wide values written by the Settings → LLM Wiki panel (the plugin
+ * row's `config`). They WIN over settings files so a GUI edit takes effect
+ * without restart; keys the user never touched stay absent, so file-based
+ * configuration keeps working underneath.
+ */
+let dshConfigOverrides: Partial<TaskConfig> = {};
+
+const OVERRIDE_BOOLEANS = [
+  "autoRecall",
+  "notices",
+  "trajectories",
+  "ambientPersonalVault",
+  "proactiveCapture",
+  "observationReminder",
+] as const;
+
+const OVERRIDE_NUMBERS = ["semanticWeight", "recallLinksThreshold", "reminderTurns"] as const;
+
+/** Keep only the fields the schema exposes, coerced to their TaskConfig shape. */
+function pickOverrides(config: unknown): Partial<TaskConfig> {
+  const source = (config && typeof config === "object" ? config : {}) as Record<string, unknown>;
+  const next: Partial<TaskConfig> = {};
+  for (const key of OVERRIDE_BOOLEANS) {
+    if (typeof source[key] === "boolean") next[key] = source[key];
+  }
+  for (const key of OVERRIDE_NUMBERS) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) next[key] = value;
+  }
+  // The schema stores taskModel as "provider/id"; TaskConfig wants a spec.
+  if (typeof source.taskModel === "string") {
+    const ref = parseModelRef(source.taskModel);
+    if (ref) next.taskModel = ref;
+  }
+  return next;
+}
+
+/**
+ * Install the profile's row config as runtime overrides (DSH config bridge).
+ * Clears the per-vault cache so the next `configForVault` sees them, and
+ * returns the applied overrides for callers that gate on them at apply time
+ * (the static policy section has no session cwd to resolve against).
+ */
+export function setDshConfigOverrides(config: unknown): Partial<TaskConfig> {
+  dshConfigOverrides = pickOverrides(config);
+  configCache.clear();
+  return dshConfigOverrides;
+}
+
+/**
+ * Read the plugin row config EXACTLY as written by configForms. Schema
+ * defaults are not materialized there (`options.config` holds only explicit
+ * keys), so file-based settings keep working until the user saves a value in
+ * the GUI. The `apply` argument DOES carry defaults — it is only a fallback
+ * for hosts without a loader, where "default" and "explicit" cannot be told
+ * apart anyway.
+ */
+export function resolveRowConfig(ctx: DshContext, fallback?: unknown): unknown {
+  try {
+    const entries = ctx.loader?.entries?.();
+    if (Array.isArray(entries)) {
+      const row = entries.find((entry) => entry?.options?.id === ROW_ID);
+      if (row) return row.options?.config;
+      if (entries.length > 0) return {};
+    }
+  } catch {
+    /* loader unavailable → fall through to the validated argument */
+  }
+  return fallback;
+}
+
 export function configForVault(vaultRoot: string, dotWikiDir: string, fresh = false): TaskConfig {
   if (!fresh) {
     const cached = configCache.get(vaultRoot);
     if (cached) return cached.config;
   }
   void dotWikiDir;
-  const config = loadTaskConfig(vaultRoot);
+  const config: TaskConfig = { ...loadTaskConfig(vaultRoot), ...dshConfigOverrides };
   configCache.set(vaultRoot, { config, mtimeMs: Date.now() });
   return config;
 }
@@ -110,10 +186,7 @@ export function getVaultWriteQueue(): {
  * Run `fn` serialized per vault root; propagates `fn`'s error to the caller
  * (unlike `enqueue`, which swallows write errors to keep the chain alive).
  */
-export async function withVaultWrite<T>(
-  vaultRoot: string,
-  fn: () => T | Promise<T>,
-): Promise<T> {
+export async function withVaultWrite<T>(vaultRoot: string, fn: () => T | Promise<T>): Promise<T> {
   let result: T | undefined;
   let failed = false;
   let failure: unknown;
