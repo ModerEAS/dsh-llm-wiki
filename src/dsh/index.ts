@@ -22,7 +22,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { bootstrapVault } from "../../extensions/llm-wiki/lib/bootstrap.js";
 import { recoverQmdIndex } from "../../extensions/llm-wiki/lib/qmd-indexing.js";
-import { personalVaultIsAmbient } from "../../extensions/llm-wiki/lib/task-config.js";
+import {
+  personalVaultIsAmbient,
+  proactiveCaptureEnabled,
+  type TaskConfig,
+} from "../../extensions/llm-wiki/lib/task-config.js";
 import {
   migrateDoubledPersonalVault,
   resolveProjectVaultRoot,
@@ -32,13 +36,20 @@ import { createDshRuntime, watchCompaction } from "./background.js";
 import { registerWikiCommands } from "./commands.js";
 import { installDshGuardrails, selfCheckGuardrails } from "./guard.js";
 import { createLogger } from "./logger.js";
-import { installPreStepListener, installRecallInjection, isMainSession } from "./recall-inject.js";
+import { installObservationReminder } from "./observe-reminder.js";
+import {
+  agentCwdFor,
+  installPolicySection,
+  installPreStepListener,
+  installRecallInjection,
+  isMainSession,
+} from "./recall-inject.js";
 import { registerSettingsUi, WikiConfigSchema } from "./settings-ui.js";
 import { registerStatusRoute } from "./status-route.js";
 import { registerWikiTools } from "./tool-defs.js";
 import type { DshAgent, DshContext } from "./types.js";
 import { patchUiState } from "./ui-state.js";
-import { configForVault } from "./vault-state.js";
+import { configForVault, resolveRowConfig, setDshConfigOverrides } from "./vault-state.js";
 
 export const PLUGIN_ID = "llm-wiki";
 
@@ -53,22 +64,14 @@ export const inject = [
   "commands",
   "settings",
   "tokenMeter",
+  // Source of the plugin row config (Settings → LLM Wiki writes it).
+  "loader",
 ];
 
 /** Row-config schema (validated at activation; see settings-ui.ts). */
 export const Config = WikiConfigSchema;
 
-function agentCwd(ctx: DshContext, agent: DshAgent): string {
-  try {
-    const dir = ctx.workingDirectory?.get?.(agent.session);
-    if (typeof dir === "string" && dir.length > 0) return dir;
-  } catch {
-    /* fall through */
-  }
-  return process.cwd();
-}
-
-export function apply(ctx: DshContext, _config?: unknown): () => void {
+export function apply(ctx: DshContext, config?: unknown): () => void {
   const logger = createLogger(ctx);
   const runtime = createDshRuntime(ctx, logger);
   const host = { ctx, runtime, logger };
@@ -78,6 +81,21 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
   let selfChecked = false;
   let migrationDone = false;
   let toolCount = 0;
+
+  // ── Settings bridge (A7): the GUI's row config IS runtime config ──
+  // configForms writes explicit keys into the `llm-wiki` row of the profile's
+  // cordis.patch.yml; `configForVault` used to read only settings files, so a
+  // GUI save did nothing. Read the row here, install it as overrides (they
+  // win over files) and clear the per-vault cache. DSH re-applies the plugin
+  // on save (HMR), so this runs again with the new values.
+  let overrides: Partial<TaskConfig> = {};
+  try {
+    overrides = setDshConfigOverrides(resolveRowConfig(ctx, config));
+    const keys = Object.keys(overrides);
+    if (keys.length > 0) logger.info(`row config applied: ${keys.join(", ")}`);
+  } catch (error) {
+    logger.warn(`row config bridge failed: ${(error as Error).message}`);
+  }
 
   const track = (dispose: () => void): void => {
     disposers.push(dispose);
@@ -100,6 +118,20 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
     installRecallInjection(ctx, runtime, logger);
   } catch (error) {
     logger.warn(`recall injection failed: ${(error as Error).message}`);
+  }
+  // Plugin-owned proactive-capture policy (replaces the deleted
+  // ~/.dsh/AGENTS.md + ~/.dsh/skills workaround). Static section, gated by
+  // the profile's `proactiveCapture` row value; default ON.
+  try {
+    if (proactiveCaptureEnabled(overrides)) track(installPolicySection(ctx, logger));
+    else logger.info("proactive-capture policy disabled by settings");
+  } catch (error) {
+    logger.warn(`policy section failed: ${(error as Error).message}`);
+  }
+  try {
+    track(installObservationReminder(ctx, logger));
+  } catch (error) {
+    logger.warn(`observation reminder failed: ${(error as Error).message}`);
   }
   try {
     track(watchCompaction(ctx, runtime, logger));
@@ -154,7 +186,7 @@ export function apply(ctx: DshContext, _config?: unknown): () => void {
       }
     });
     try {
-      const cwd = agentCwd(ctx, agent);
+      const cwd = agentCwdFor(ctx, agent);
 
       // Startup self-check, once per plugin generation (H01): the decision
       // function is pure, so any cwd exercises it.

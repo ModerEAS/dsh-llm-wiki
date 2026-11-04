@@ -50,7 +50,8 @@ function sessionIdOf(agent: DshAgent): string {
   return agent?.session?.id ?? "";
 }
 
-function agentCwdFor(ctx: DshContext, agent: DshAgent): string {
+/** Session working directory, falling back to process.cwd() defensively. */
+export function agentCwdFor(ctx: DshContext, agent: DshAgent): string {
   try {
     const dir = ctx.workingDirectory?.get?.(agent.session);
     if (typeof dir === "string" && dir.length > 0) return dir;
@@ -107,6 +108,44 @@ export function installRecallInjection(
 
   const disposePreStep = installPreStepListener(ctx, runtime, logger);
   return { disposePreStep, disposeSection: () => undefined };
+}
+
+/**
+ * Plugin-owned proactive-capture policy, rendered as its own static section.
+ *
+ * It replaces the pi-era environment-level workaround (a `~/.dsh/AGENTS.md`
+ * plus a user skill) that only existed on one machine: every install now
+ * carries the same behavior, and Settings → LLM Wiki can turn it off
+ * (`proactiveCapture`).
+ *
+ * BYTE-STABLE BY CONTRACT: no timestamps, cwd, counts, or session data — the
+ * section is re-evaluated every step and any variation rewrites system node 0,
+ * killing the provider prefix cache (issue #92 / D11). `test/dsh/policy.test.ts`
+ * pins this.
+ */
+export const WIKI_POLICY_BLOCK = `<wiki_policy>
+LLM Wiki is active in this session. Use it without being asked:
+- Before non-trivial work, call wiki_recall to check what the wiki already knows.
+- During and after meaningful work, record what you learned: wiki_observe for atomic facts, wiki_retro for the task insight, wiki_ensure_page for durable pages.
+- For external URLs, files, or pasted text, call wiki_capture_source, then wiki_ingest.
+- Skip pure chat, transient state, and one-off command output.
+- Never write passwords, tokens, or private keys into the wiki.
+- A task that produced reusable knowledge is not complete until its durable part is in the wiki.
+</wiki_policy>`;
+
+/** Register the static policy section (gated by the `proactiveCapture` setting). */
+export function installPolicySection(ctx: DshContext, logger?: WikiLogger): () => void {
+  try {
+    const off = ctx.systemPrompt?.section?.({
+      name: "llm-wiki-policy",
+      order: 890,
+      text: () => WIKI_POLICY_BLOCK,
+    });
+    return typeof off === "function" ? (off as () => void) : () => undefined;
+  } catch (error) {
+    logger?.warn(`policy section failed: ${(error as Error).message}`);
+    return () => undefined;
+  }
 }
 
 export function installPreStepListener(

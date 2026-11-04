@@ -151,7 +151,11 @@ describe("apply (HMR backfill + unload, H29/B8)", () => {
     const cleanup = apply(ctx);
     expect(tools.size).toBe(18);
     expect(commands.size).toBeGreaterThan(0);
-    expect(sections).toHaveLength(1);
+    // Static status footer + plugin-owned proactive-capture policy.
+    expect((sections as Array<{ name?: string }>).map((s) => s.name).sort()).toEqual([
+      "llm-wiki",
+      "llm-wiki-policy",
+    ]);
     expect(events.has("agent/created")).toBe(true);
     expect(events.has("agent/pre-step")).toBe(true);
     expect(typeof cleanup).toBe("function");
