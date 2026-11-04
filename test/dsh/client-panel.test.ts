@@ -276,6 +276,26 @@ describe("dsh webui status panel", () => {
     expect(JSON.stringify(tree)).toContain("⚠️ Warning");
   });
 
+  it("scrolls the panel body inside the host flex column", () => {
+    const { found, scope } = registered();
+    const panel = found.get("main:wiki-status") as (props: Record<string, unknown>) => unknown;
+    const page = render(panel, { scope, t: (key: string) => key }, [
+      null,
+      { loading: false, data: fixture, error: null },
+    ]) as Node;
+    expect(page.props.className).toBe("lwiki-page");
+    const style = (page.children as Node[]).find((child) => child.type === "style");
+    const css = texts(style).join("").replace(/\s+/g, " ");
+    const start = css.indexOf(".lwiki-page {");
+    // `.mainPanel` is a flex column with min-height:0; the root must fill it
+    // and own the scrollbar, or the content overflows a clipped ancestor.
+    const rule = css.slice(start, css.indexOf("}", start) + 1);
+    expect(rule).toContain("flex: 1");
+    expect(rule).toContain("min-height: 0");
+    expect(rule).toContain("overflow-y: auto");
+    expect(rule).not.toContain("min-height: 100%");
+  });
+
   it("keeps the empty and loading states", () => {
     const { found, scope } = registered();
     const panel = found.get("main:wiki-status") as (props: Record<string, unknown>) => unknown;

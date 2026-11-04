@@ -249,10 +249,17 @@ window.__ModuleLoader__.load({
     ];
 
     const WIKI_PANEL_CSS = [
+      // The panel root is the only child of the host's `.mainPanel` flex column
+      // (the `main` slot anchor is `display: contents`). Without `flex: 1` +
+      // `min-height: 0` it sizes to its content and overflows the center
+      // column, which clips it (`overflow: hidden`) — so nothing can scroll.
       ".lwiki-page {",
       "  box-sizing: border-box;",
       "  width: 100%;",
-      "  min-height: 100%;",
+      "  flex: 1;",
+      "  min-height: 0;",
+      "  overflow-x: hidden;",
+      "  overflow-y: auto;",
       "  padding: 28px clamp(20px, 4vw, 48px) 48px;",
       "  color: var(--dsw-alias-label-primary, inherit);",
       "  font-size: 14px;",
