@@ -36,24 +36,31 @@ The personal vault lives at `~/.llm-wiki/` (or `$WIKI_HOME`) and is always avail
 ## Agent Settings
 
 Runtime settings for the wiki's background tasks live under the `llm-wiki`
-namespace of the host's settings file. Both host layouts are read and merged,
+namespace of the host's settings file. Every host layout is read and merged,
 lowest precedence first:
 
 1. `<agentDir>/settings.json`, then `config.yml` / `config.yaml`
    — `~/.pi/agent` under pi, `~/.omp/agent` under oh-my-pi
 2. `<cwd>/.pi/{settings.json,config.yml,config.yaml}`
 3. `<cwd>/.omp/{settings.json,config.yml,config.yaml}`
+4. `<cwd>/.dsh/{settings.json,config.yml,config.yaml}`
 
-The **host-native** project directory is applied last, so it wins: `.omp` under
-oh-my-pi, `.pi` under pi. Reading the other host's directory means a vault
-configured under pi keeps working after `omp` takes over the repository.
+The **host-native** project directory is applied last, so it wins: `.dsh` under
+DeepSeek Harness, `.omp` under oh-my-pi, `.pi` under pi. Reading the other
+hosts' directories means a vault configured under pi keeps working after `omp`
+or DSH takes over the repository.
 
-`/wiki-model` and `/wiki-trajectories` write JSON only, into whichever project
-config directory already exists (host-native first, created if neither is
-present). A hand-authored `config.yml` is read but never rewritten.
+Under **DeepSeek Harness** the primary surface is Settings → **LLM Wiki** (see
+[`docs/dsh.md`](dsh.md)). The panel writes the plugin row config in the
+profile's `cordis.patch.yml`, and those values take precedence over every
+settings file below them — per key. Keys the user never saved in the GUI stay
+absent from the row, so file-based configuration keeps working underneath.
+`/wiki-model` writes JSON only, into whichever project config directory already
+exists (host-native first, created if neither is present); a hand-authored
+`config.yml` is read but never rewritten. The panel also edits `taskModel`, and
+a value saved there wins over the file.
 
 | Setting                | Default    | Description                                                  |
-All of the above are viewable and editable in the `/wiki-settings` TUI (persists to project or global settings).
 | ---------------------- | ---------- | ------------------------------------------------------------ |
 | `taskModel`            | —          | Model for background tasks (`{ provider: "openai", id: "gpt-4o" }`) |
 | `taskModelBaseUrl`      | —          | OpenAI-compatible base URL used by the MCP ingest lane |
@@ -63,6 +70,9 @@ All of the above are viewable and editable in the `/wiki-settings` TUI (persists
 | `synthesisMaxTokens`     | 16384    | Max output tokens for ingest/synthesis runs (stored as a plain number)                        |
 | `wikilinkValidation`   | warn       | Pre-write wikilink gate for page writes (ingest, `wiki_ensure_page`, `wiki_retro`, MCP `wiki_retro`). `off` ignore, `warn` report, `normalize` rewrite resolvable links, `strict` block writes with unresolved/ambiguous links |
 | `trajectories`         | false      | Enable agent-trajectory working-memory                       |
+| `proactiveCapture`     | true       | DSH: render the plugin-owned proactive-capture policy in the static system prompt |
+| `observationReminder`  | true       | DSH: remind the agent to record reusable knowledge after quiet turns |
+| `reminderTurns`        | 5          | DSH: turns between reminders (minimum 1)                      |
 | `notices`              | true       | Show wiki activity notices in chat                           |
 | `ambientPersonalVault` | host-dependent | Let the personal vault act as the ambient vault in projects that have no wiki. `true` under pi, `false` under oh-my-pi — see below. |
 | `semanticWeight`       | 0.5      | Weight of the semantic sub-score in hybrid recall (clamped 0–1)                               |
@@ -73,6 +83,9 @@ All of the above are viewable and editable in the `/wiki-settings` TUI (persists
 | `embeddingBaseUrl`     | —        | Optional API base URL override for the embedding provider                                     |
 | `embeddingApiKey`      | —        | API key literal — prefer `embeddingApiKeyEnv` so no secret lands in settings                  |
 | `embeddingApiKeyEnv`   | —        | Name of the environment variable holding the embedding API key                                |
+
+All of the above are also viewable and editable in the `/wiki-settings` TUI
+(pi/omp; it persists to project or global settings).
 
 `taskModelBaseUrl`, `taskModelApiKey`, and `taskModelApiKeyEnv` are additive
 settings for the MCP host's synchronous ingest lane. Pi still resolves its
@@ -104,8 +117,9 @@ This means when you're in a project with its own `.llm-wiki/`, that project wiki
 ### Ambient surfaces in projects without a wiki
 
 Three surfaces fire without being asked: the session notice, the periodic
-observe/retro reminder, and the `before_agent_start` recall injection (plus its
-`<wiki_status>` system-prompt footer).
+observe/retro reminder (`observationReminder`, `reminderTurns`), and the recall
+injection (plus its `<wiki_status>` footer and, under DSH, the
+`proactiveCapture` policy block).
 
 Because vault resolution falls back to the personal vault, those surfaces would
 otherwise speak up in *every* directory as soon as `~/.llm-wiki/` exists —

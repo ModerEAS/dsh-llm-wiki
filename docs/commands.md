@@ -14,7 +14,7 @@
 | `/wiki-digest`   | Daily/weekly summary                  |
 | `/wiki-retro`    | Save atomic insights from tasks        |
 | `/wiki-model`    | View/set the background-task model     |
-| `/wiki-trajectories` | Enable/disable agent working-memory (`on`/`off`, opt-in) |
+| `/wiki-trajectories` | Enable/disable agent working-memory (`on`/`off`, opt-in) — pi/omp only; under DSH use Settings → LLM Wiki → **Agent trajectories** |
 | `/wiki-record`   | Capture the completed task's trajectory (requires trajectories enabled) |
 | `/wiki-skills`   | Search distilled skills + past cases (requires trajectories enabled) |
 | `/wiki-req` | Decompose a concept into atomic requirement pages |
@@ -25,8 +25,8 @@
 
 The extension always registers 14 tools the LLM can call directly. The 3 agent-trajectory
 tools (`wiki_capture_trajectory`, `wiki_distill_skills`, `wiki_recall_skill`) are **opt-in,
-off by default** (issue #80) — registered only when `llm-wiki.trajectories` is enabled
-(`/wiki-trajectories on`).
+off by default** (issue #80) — available only when `llm-wiki.trajectories` is enabled
+(`/wiki-trajectories on` under pi/omp, Settings → LLM Wiki → **Agent trajectories** under DSH).
 
 | Tool                  | Purpose                                     |
 | --------------------- | ------------------------------------------- |
@@ -71,7 +71,7 @@ off by default** (issue #80) — registered only when `llm-wiki.trajectories` is
 
 ### Task → Record → Distill (agent working-memory)
 
-_Opt-in: enable first with `/wiki-trajectories on`._
+_Opt-in: enable first with `/wiki-trajectories on` (pi/omp) or Settings → LLM Wiki → **Agent trajectories** (DSH)._
 
 1. Finish a non-trivial task (debug, refactor, integration)
 2. `wiki_capture_trajectory(title="...")` — auto-extracts the tool-call trajectory from the live session into `raw/trajectories/TRJ-*` with a self-contained summary (no skeleton to flesh)

@@ -27,9 +27,15 @@ release cycle; the MCP server (`mcp/`) is kept as an alternative access path.
 3. The plugin row `llm-wiki` activates on HMR; open a project with (or
    without — it bootstraps silently) a `.llm-wiki/` vault.
 
-Settings live in the Settings panel → **LLM Wiki** section (WebUI), with
-`/wiki-model` and `/wiki-trajectories` as command-line equivalents.
+Settings live in the Settings panel → **LLM Wiki** section (WebUI). It is the
+primary control for every switch: `autoRecall`, `notices`, `trajectories`,
+`proactiveCapture`, `observationReminder`, `reminderTurns`, `taskModel`,
+`semanticWeight`, `recallLinksThreshold`, `ambientPersonalVault`.
 Settings → Agent presets also lists **LLM Wiki synthesis** (child synthesis lane).
+
+`/wiki-model` remains as a file-based shortcut for the background model. There is
+no `/wiki-trajectories` command in DSH: trajectories is a GUI switch and nothing
+else, so there is exactly one place to turn it on.
 
 > Settings ≠ status sidebar. The Settings section edits behavior; the
 > **sidebar status panel** (line-icon entry in `sidebar.panellist` → `main` page `wiki-status`)
@@ -40,6 +46,65 @@ Settings → Agent presets also lists **LLM Wiki synthesis** (child synthesis la
 > profile that serves the WebUI composes `webServer`. A transient
 > recall/background line also docks near the composer
 > (`conversation.composer.dock`); it renders nothing when `notices: false`.
+## Settings → runtime bridge
+
+The panel edits the plugin **row config** — the `config` mapping under the
+`llm-wiki` row of the profile's `cordis.patch.yml`. Writers: `configForms`
+(client) → Host Loader → plugin. Readers used to be settings files only, so a
+GUI save did nothing.
+
+`apply(ctx, config)` now reads the row through `ctx.loader.entries()` (the entry
+whose `options.id === "llm-wiki"`), because `options.config` holds **only
+explicitly written keys** — schema defaults are not materialized there.
+`setDshConfigOverrides()` keeps those keys, drops `undefined`, converts
+`taskModel: "provider/id"` into a `{ provider, id }` spec, and clears the
+per-vault `configForVault` cache. `configForVault()` then returns
+`{ ...loadTaskConfig(vaultRoot), ...overrides }` — row values win per key, and a
+key the user never saved still comes from `.dsh/.pi/.omp` settings files.
+
+Consequences worth knowing:
+
+- Saving in the panel re-applies the plugin (HMR). No restart, no command.
+- The bridge is per process/profile, not per vault: files stay per vault, the
+  row is shared. Two vaults never inherit each other's file values.
+- A fresh install ships `config: {}` in `dsh/cordis.patch.yml` on purpose — a
+  seeded default would mask an existing project's settings file.
+- If the loader is unavailable, `apply` falls back to its `config` argument
+  (which does carry schema defaults; that only matters on unknown hosts).
+
+## Proactive capture (plugin-owned)
+
+`src/dsh/recall-inject.ts` registers a second static system-prompt section,
+`llm-wiki-policy` (`WIKI_POLICY_BLOCK`, order 890), next to the `<wiki_status>`
+footer. It tells the model to recall before non-trivial work, to
+`wiki_observe` / `wiki_retro` / `wiki_ensure_page` during and after it, to
+`wiki_capture_source` → `wiki_ingest` for external material, what to skip, and
+never to write secrets. It is byte-stable (no timestamps, cwd, or counts), so
+the provider prefix cache stays warm. `proactiveCapture: false` removes it.
+
+This replaces the earlier `~/.dsh/AGENTS.md` + `~/.dsh/skills/llm-wiki`
+workaround, which only existed on one machine. Nothing in `src/dsh/` reads
+those paths, and the repository does not ship them: every install gets the same
+behavior from the plugin itself.
+
+## Observation reminder
+
+pi reminds at `agent_end` every 5 turns. DSH has no `agent_end`, so
+`src/dsh/observe-reminder.ts` rebuilds the same nudge from the hooks DSH does
+have:
+
+| Hook | Role |
+|---|---|
+| `agent/pre-step` | Counts a turn at `step === 1`, deduped on `payload.turn` (a turn has many steps). At the interval, appends the reminder to `decision.messages`. |
+| `tools/result` | `wiki_observe`, `wiki_retro`, `wiki_ensure_page`, `wiki_ingest`, or `wiki_capture_source` marks the session as "already wrote" → no further reminders. |
+| `agent/created` / `agent/disposed` | Per-session state; disposed sessions drop their counter. |
+
+It appends — never replaces — `decision.messages` (a replacement would drop the
+user's prompt, H10), and tags the message `source: { kind: "llm-wiki-reminder" }`.
+Main sessions only (subagents skip), and only when a wiki applies (project vault
+or an ambient personal vault that is actually bootstrapped). Settings:
+`observationReminder` (default on) and `reminderTurns` (default 5, minimum 1).
+
 Pure queries are slash commands (`/wiki-status`, `/wiki-search`,
 `/wiki-recall`, `/wiki-lint`); work-initiating commands (`/wiki-bootstrap`,
 `/wiki-capture`, `/wiki-ingest`) queue a followup prompt so upstream
@@ -61,6 +126,8 @@ semantics survive the "commands create no model message" rule.
 | Trajectory v1: fold/surface, shape convert, `tool_call_count > 0` | `src/dsh/trajectory-dsh.ts` |
 | `console.warn` → `ctx.logger` | `src/dsh/logger.ts` |
 | Former TUI settings → WebUI section; other commands stay slash; Config fields `.volatile()` for describe/whileServed | `src/dsh/settings-ui.ts`, `dsh/client.js`, `src/dsh/commands.ts` |
+| Row config → runtime config bridge (GUI wins per key, cache cleared) | `src/dsh/index.ts` (`apply`), `src/dsh/vault-state.ts` (`setDshConfigOverrides`, `resolveRowConfig`) |
+| Proactive-capture policy + observation reminder (plugin-owned, no env files) | `src/dsh/recall-inject.ts` (`WIKI_POLICY_BLOCK`), `src/dsh/observe-reminder.ts` |
 | Approval: allow-listed programs + directories, else deny | `src/dsh/approval.ts` |
 | Minimal `lib/**` patches (each marked `DSH-PATCH` with reason) | `lib/host.ts` (dsh host), `lib/utils.ts` (atomic `writeJson`), `lib/guardrails.ts` (pi-import-free) |
 
@@ -109,3 +176,12 @@ the following need a live DeepSeek Harness (`0.2.1-rc.3`, desktop profile):
       need `.volatile()` so describe serves values into the section).
 - [ ] With an approval policy composed, wiki tools allow/deny as
       documented; subagent synthesis cannot escalate.
+- [ ] Settings → LLM Wiki → `trajectories` ON registers the 3 trajectory tools
+      on the next turn, OFF gates them again (row config → `configForVault`).
+- [ ] Saving any panel field re-applies the plugin without restart and the new
+      value is visible in `/wiki-status` capabilities.
+- [ ] A fresh session in a vault starts with the `<wiki_policy>` section, with
+      no `~/.dsh/AGENTS.md` and no user skill installed.
+- [ ] `observationReminder` ON: after `reminderTurns` wiki-less turns exactly one
+      reminder appears; after a `wiki_observe` call none appear again in that
+      session. OFF: none at all.
