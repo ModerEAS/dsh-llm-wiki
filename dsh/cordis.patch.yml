@@ -6,10 +6,11 @@
 - insert:
     - id: llm-wiki
       name: 'dsh-llm-wiki'
-      config:
-        autoRecall: true
-        notices: true
-        trajectories: false
+      # Empty on purpose: Settings → LLM Wiki writes a key here only when the
+      # user saves it, and the plugin gives those explicit row values
+      # precedence over `llm-wiki` settings files. Seeding defaults here would
+      # mask a project's `.dsh/settings.json` for no gain.
+      config: {}
     # Synthesis child preset (T6.3/H13): persona-only, outputSchema/JSON
     # handoff. Appears in Settings → Agent presets as "LLM Wiki synthesis".
     # Never sets registry `default` (stays Standard / user choice) and never

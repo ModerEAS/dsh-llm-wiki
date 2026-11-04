@@ -9,15 +9,12 @@ import {
   loadTaskConfig,
   parseModelRef,
   persistTaskModel,
-  persistTrajectoriesEnabled,
 } from "../../extensions/llm-wiki/lib/task-config.js";
-import { resolveVaultPaths } from "../../extensions/llm-wiki/lib/utils.js";
 import type { DshRuntime } from "./background.js";
 import { agentCwd } from "./guard.js";
 import type { WikiLogger } from "./logger.js";
 import { type RunnerDeps, runLint, runRecall, runSearch, runStatus } from "./runners.js";
 import type { DshAgent, DshContext } from "./types.js";
-import { invalidateVaultConfig } from "./vault-state.js";
 
 export interface CommandHost {
   ctx: DshContext;
@@ -197,40 +194,6 @@ export function buildWikiCommands(host: CommandHost): WikiCommand[] {
           return {
             kind: "success",
             text: `Background synthesis model set to ${ref.provider}/${ref.id}.`,
-          };
-        } catch (error) {
-          return { kind: "error", text: (error as Error).message };
-        }
-      },
-    },
-    {
-      name: "wiki-trajectories",
-      description: "Enable or disable agent-trajectory memory (capture/distill/recall skills).",
-      hint: "[on | off]",
-      handler: (invocation) => {
-        const cwd = cwdFor(host, invocation.agent);
-        const arg = invocation.rawInput.trim().toLowerCase();
-        try {
-          if (!arg) {
-            const config = loadTaskConfig(cwd);
-            const on = Boolean(config.trajectories);
-            return {
-              kind: "success",
-              text: `Agent trajectories: ${on ? "enabled" : "disabled"}. Usage: /wiki-trajectories [on | off] (takes effect immediately — no reload needed).`,
-            };
-          }
-          if (arg !== "on" && arg !== "off") {
-            return { kind: "error", text: "Usage: /wiki-trajectories [on | off]" };
-          }
-          persistTrajectoriesEnabled(cwd, arg === "on");
-          try {
-            invalidateVaultConfig(resolveVaultPaths(cwd).root);
-          } catch {
-            /* best effort */
-          }
-          return {
-            kind: "success",
-            text: `Agent trajectories ${arg === "on" ? "enabled" : "disabled"}.`,
           };
         } catch (error) {
           return { kind: "error", text: (error as Error).message };

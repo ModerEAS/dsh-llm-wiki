@@ -35,13 +35,57 @@ export const WikiConfigSchema = z.object({
   // Every settings-editable field must be `.volatile()` — Host `settings.describe`
   // drops namespaces with no volatile form, so whileServed(['llm-wiki']) never
   // mounts the client settings.section (T1.2 live failure).
-  autoRecall: z.boolean().default(true).description("Automatic per-turn wiki recall injection.").volatile(),
-  notices: z.boolean().default(true).description("Surface wiki activity (recall hits, reminders, reports) in the UI.").volatile(),
-  trajectories: z.boolean().default(false).description("Opt-in agent-trajectory memory (capture / distill / recall skills).").volatile(),
-  taskModel: z.string().description("Background synthesis model as 'provider/id'. Empty = session model.").volatile(),
-  semanticWeight: z.number().default(0.5).description("Weight of the semantic signal in hybrid recall (0 = pure lexical).").volatile(),
-  recallLinksThreshold: z.number().default(50).description("Vault page count above which recall returns links-first.").volatile(),
-  ambientPersonalVault: z.boolean().description("Let the personal vault fire ambient recall outside project vaults.").volatile(),
+  autoRecall: z
+    .boolean()
+    .default(true)
+    .description("Automatic per-turn wiki recall injection.")
+    .volatile(),
+  notices: z
+    .boolean()
+    .default(true)
+    .description("Surface wiki activity (recall hits, reminders, reports) in the UI.")
+    .volatile(),
+  trajectories: z
+    .boolean()
+    .default(false)
+    .description("Opt-in agent-trajectory memory (capture / distill / recall skills).")
+    .volatile(),
+  proactiveCapture: z
+    .boolean()
+    .default(true)
+    .description("Inject the proactive-capture policy (recall before work, observe/retro after).")
+    .volatile(),
+  observationReminder: z
+    .boolean()
+    .default(true)
+    .description(
+      "Remind the agent to record reusable knowledge after a few turns without a wiki write.",
+    )
+    .volatile(),
+  reminderTurns: z
+    .number()
+    .default(5)
+    .min(1)
+    .description("Turns between observation reminders (minimum 1).")
+    .volatile(),
+  taskModel: z
+    .string()
+    .description("Background synthesis model as 'provider/id'. Empty = session model.")
+    .volatile(),
+  semanticWeight: z
+    .number()
+    .default(0.5)
+    .description("Weight of the semantic signal in hybrid recall (0 = pure lexical).")
+    .volatile(),
+  recallLinksThreshold: z
+    .number()
+    .default(50)
+    .description("Vault page count above which recall returns links-first.")
+    .volatile(),
+  ambientPersonalVault: z
+    .boolean()
+    .description("Let the personal vault fire ambient recall outside project vaults.")
+    .volatile(),
 });
 
 /** Field list shared conceptually with the client section (kept in sync by hand). */
@@ -49,6 +93,9 @@ export const WIKI_SETTINGS_FIELDS = [
   "autoRecall",
   "notices",
   "trajectories",
+  "proactiveCapture",
+  "observationReminder",
+  "reminderTurns",
   "taskModel",
   "semanticWeight",
   "recallLinksThreshold",
@@ -64,16 +111,14 @@ export function registerSettingsUi(ctx: DshContext, logger?: WikiLogger): () => 
   // Must be an effect under inject(['settings']) so a late/replaced Settings
   // service still picks the policy up (dsh-settings README).
   try {
-    const inject = (ctx as { inject?: (deps: string[], fn: (c: DshContext) => void) => void }).inject;
+    const inject = (ctx as { inject?: (deps: string[], fn: (c: DshContext) => void) => void })
+      .inject;
     if (typeof inject === "function") {
       inject(["settings"], (settingsCtx) => {
-        settingsCtx.effect?.(
-          () => {
-            settingsCtx.settings?.configure?.({ auto: false }, ctx.fiber);
-            return () => undefined;
-          },
-          "llm-wiki settings auto:false",
-        );
+        settingsCtx.effect?.(() => {
+          settingsCtx.settings?.configure?.({ auto: false }, ctx.fiber);
+          return () => undefined;
+        }, "llm-wiki settings auto:false");
       });
     } else {
       ctx.settings?.configure?.({ auto: false }, ctx.fiber);

@@ -26,8 +26,9 @@
  *
  * DRAFT: assembled from the researched configForms/slots contract; NOT yet
  * verified against a live Harness. If `configForms` or the `settings.section`
- * slot is absent, apply() no-ops and settings remain editable via
- * /wiki-model, /wiki-trajectories, and settings files.
+ * slot is absent, apply() no-ops and the plugin row config keeps the schema
+ * defaults (Settings → LLM Wiki is the primary surface, including
+ * trajectories; /wiki-model stays as the file-based model shortcut).
  */
 window.__ModuleLoader__.load({
   id: "dsh-llm-wiki",
@@ -124,6 +125,14 @@ window.__ModuleLoader__.load({
         "field.notices.hint": "Show recall hits, reminders, and background reports.",
         "field.trajectories.label": "Agent trajectories",
         "field.trajectories.hint": "Opt-in working memory: capture, distill, and recall skills.",
+        "field.proactiveCapture.label": "Proactive capture",
+        "field.proactiveCapture.hint":
+          "Tell the agent to recall before work and record what it learns.",
+        "field.observationReminder.label": "Observation reminder",
+        "field.observationReminder.hint":
+          "Nudge the agent to save insights after a few quiet turns.",
+        "field.reminderTurns.label": "Reminder interval",
+        "field.reminderTurns.hint": "Turns between reminders (default 5, minimum 1).",
         "field.taskModel.label": "Synthesis model",
         "field.taskModel.hint": "'provider/id'. Empty = session model.",
         "field.semanticWeight.label": "Semantic weight",
@@ -221,6 +230,12 @@ window.__ModuleLoader__.load({
         "field.notices.hint": "显示召回命中、提醒和后台报告。",
         "field.trajectories.label": "智能体轨迹",
         "field.trajectories.hint": "可选的工作记忆：采集、提炼与召回技能。",
+        "field.proactiveCapture.label": "主动捕获",
+        "field.proactiveCapture.hint": "让模型先召回、再做，并记录学到的内容。",
+        "field.observationReminder.label": "记录提醒",
+        "field.observationReminder.hint": "连续若干轮没有写入知识库时，提醒模型记录。",
+        "field.reminderTurns.label": "提醒间隔",
+        "field.reminderTurns.hint": "每多少轮提醒一次（默认 5，最小 1）。",
         "field.taskModel.label": "合成模型",
         "field.taskModel.hint": "“provider/id”。留空则使用当前会话模型。",
         "field.semanticWeight.label": "语义权重",
@@ -619,6 +634,24 @@ window.__ModuleLoader__.load({
         labelKey: "field.trajectories.label",
         hintKey: "field.trajectories.hint",
         type: "boolean",
+      },
+      {
+        key: "proactiveCapture",
+        labelKey: "field.proactiveCapture.label",
+        hintKey: "field.proactiveCapture.hint",
+        type: "boolean",
+      },
+      {
+        key: "observationReminder",
+        labelKey: "field.observationReminder.label",
+        hintKey: "field.observationReminder.hint",
+        type: "boolean",
+      },
+      {
+        key: "reminderTurns",
+        labelKey: "field.reminderTurns.label",
+        hintKey: "field.reminderTurns.hint",
+        type: "number",
       },
       {
         key: "taskModel",

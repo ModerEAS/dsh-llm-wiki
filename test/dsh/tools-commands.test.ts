@@ -147,7 +147,6 @@ describe("buildWikiCommands", () => {
       "wiki-bootstrap",
       "wiki-ingest",
       "wiki-model",
-      "wiki-trajectories",
     ]) {
       expect(names).toContain(name);
     }
@@ -174,20 +173,9 @@ describe("buildWikiCommands", () => {
     expect(bad).toMatchObject({ kind: "error" });
   });
 
-  it("wiki-trajectories toggles without reload (H11)", async () => {
-    const h = host();
-    const commands = buildWikiCommands(h);
-    const agent = { session: { id: "s" } };
-    const trajectories = commands.find((c) => c.name === "wiki-trajectories");
-    expect(await trajectories?.handler({ agent, rawInput: "on" })).toMatchObject({
-      kind: "success",
-    });
-    expect(await trajectories?.handler({ agent, rawInput: "off" })).toMatchObject({
-      kind: "success",
-    });
-    expect(await trajectories?.handler({ agent, rawInput: "maybe" })).toMatchObject({
-      kind: "error",
-    });
+  it("exposes no trajectories command — Settings → LLM Wiki owns that switch", () => {
+    const names = buildWikiCommands(host()).map((c) => c.name);
+    expect(names).not.toContain("wiki-trajectories");
   });
 
   it("createLogger never throws and falls back without ctx", () => {
