@@ -350,8 +350,13 @@ describe("package structure", () => {
 
   it("should have a comprehensive README with install instructions", () => {
     const readme = readFile(join(rootDir, "README.md"));
-    expect(readme).toContain("@zosmaai/pi-llm-wiki");
-    expect(readme).toContain("pi install npm:@zosmaai/pi-llm-wiki");
+    // This fork ships the native DeepSeek Harness bundle, not the upstream npm
+    // package; the README must document the DSH install, not `pi install`.
+    expect(readme).toContain("DeepSeek Harness");
+    expect(readme).toContain("pnpm build:dsh");
+    expect(readme).toContain("install_bundle");
+    expect(readme).toContain("docs/dsh.md");
+    expect(readme).not.toContain("pi install npm:@zosmaai/pi-llm-wiki");
     expect(readme).toContain("Karpathy");
     expect(readme).toContain("Obsidian");
   });
@@ -374,7 +379,9 @@ describe("package structure", () => {
     const entry = (pkg.pi.mcpservers["llm-wiki"] as string).replace(/^node\s+\.\//, "");
     expect(entry).toBe("dist/mcp/index.js");
 
-    const documented = /@zosmaai\/pi-llm-wiki\/\S*mcp\/index\.js/g;
+    // Any README path that mentions mcp/index.js must point at the built
+    // `dist/mcp/index.js`, never at the TypeScript-only `mcp/` source dir.
+    const documented = /\S*mcp\/index\.js/g;
     const english = readFile(join(rootDir, "README.md"));
     expect([...english.matchAll(documented)].length).toBeGreaterThan(0);
 

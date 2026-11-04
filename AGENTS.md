@@ -4,7 +4,9 @@ Instructions for AI agents working on this codebase.
 
 ## Project
 
-`@zosmaai/pi-llm-wiki` — A package that implements Andrej Karpathy's LLM Wiki pattern as a self-maintaining knowledge base. It loads under **two hosts**: pi (`@mariozechner/pi-coding-agent`) and oh-my-pi (`omp`).
+A package that implements Andrej Karpathy's LLM Wiki pattern as a self-maintaining knowledge base. It loads under **two hosts**: pi (`@mariozechner/pi-coding-agent`) and oh-my-pi (`omp`).
+
+In this `ModerRAS/dsh-llm-wiki` tree the **primary ship path is the native DeepSeek Harness (DSH) bundle in [`dsh/`](dsh/)** (built with `pnpm build:dsh`, installed via `plugin_manager` → `install_bundle`; see [`docs/dsh.md`](docs/dsh.md)). The pi/omp extension and the MCP server (`mcp/`) remain as secondary paths. The root npm name still reads `@zosmaai/pi-llm-wiki` because this fork has not renamed or published it — do not advertise it as the install path.
 
 ## Tech Stack
 

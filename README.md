@@ -1,127 +1,149 @@
 <div align="center">
 
-# @zosmaai/pi-llm-wiki
+# dsh-llm-wiki
 
 **English** | <a href="./README.zh.md">中文</a> | <a href="./README.es.md">Español</a> | <a href="./README.ja.md">日本語</a> | <a href="./README.de.md">Deutsch</a> | <a href="./README.fr.md">Français</a> | <a href="./README.pt.md">Português</a> | <a href="./README.ru.md">Русский</a> | <a href="./README.ko.md">한국어</a> | <a href="./README.hi.md">हिंदी</a>
 
-[![CI](https://github.com/zosmaai/pi-llm-wiki/actions/workflows/ci.yml/badge.svg)](https://github.com/zosmaai/pi-llm-wiki/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@zosmaai/pi-llm-wiki)](https://www.npmjs.com/package/@zosmaai/pi-llm-wiki)
-[![npm downloads](https://img.shields.io/npm/dm/@zosmaai/pi-llm-wiki)](https://www.npmjs.com/package/@zosmaai/pi-llm-wiki)
-[![Coverage](https://img.shields.io/badge/coverage-85.09%25-brightgreen.svg)](https://codecov.io/gh/zosmaai/pi-llm-wiki)
+[![CI](https://github.com/ModerRAS/dsh-llm-wiki/actions/workflows/ci.yml/badge.svg)](https://github.com/ModerRAS/dsh-llm-wiki/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](https://zosmaai.github.io/pi-llm-wiki/)
-[![CodeQL](https://github.com/zosmaai/pi-llm-wiki/actions/workflows/codeql.yml/badge.svg)](https://github.com/zosmaai/pi-llm-wiki/actions/workflows/codeql.yml)
-[![GitHub Repo Stars](https://img.shields.io/github/stars/zosmaai/pi-llm-wiki?style=social)](https://github.com/zosmaai/pi-llm-wiki/stargazers)
 
 </div>
 
 <br/>
 
+**LLM Wiki as a native [DeepSeek Harness (DSH)](docs/dsh.md) plugin: a self-maintaining,
+Obsidian-compatible knowledge base that lives inside your project.**
 
+Follows Andrej Karpathy's [LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
+turn raw sources (URLs, PDFs, markdown, JSON, XML) into a durable, interlinked,
+LLM-maintained wiki that **compounds** instead of being re-derived on every question.
 
-**Self-maintaining, Obsidian-compatible knowledge base for [pi](https://pi.dev).**
-Follows Andrej Karpathy's [LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
-
-Turn raw sources (URLs, PDFs, markdown, JSON, XML) into a durable, interlinked, LLM-maintained wiki that compounds over time.
+This repository is the DSH fork of
+[`zosmaai/pi-llm-wiki`](https://github.com/zosmaai/pi-llm-wiki). The wiki format is
+identical — a vault moves freely between the two builds.
 
 ### Native Open Knowledge Format (OKF) v0.2 support
 
-Build a knowledge base you can carry forward — not another closed, app-specific export:
-
 - **Create portable OKF v0.2 documents** with canonical frontmatter, standard Markdown links, and stable source citations.
-- **Read both legacy and OKF pages** so existing vaults keep working without an automatic migration or rewrite.
+- **Read both legacy and OKF pages**, so existing vaults keep working without an automatic migration or rewrite.
 - **Generate deterministic indexes and logs** from authoritative pages, keeping navigation and metadata reproducible.
-- **Use the same knowledge model from Pi or MCP** with Claude Code, Cursor, Windsurf, and other MCP clients.
+- **Use the same knowledge model from DSH or MCP** — DeepSeek Harness natively, or Claude Code, Cursor, Codex, Zed and Cline over MCP.
 - **Stay Obsidian-compatible** while keeping your knowledge ready for tools that support Open Knowledge Format.
 
-Start with a new OKF vault, or point pi-llm-wiki at an existing vault and adopt the format on your terms. See the [OKF Foundation specification](docs/superpowers/specs/2026-08-02-okf-foundation-design.md) for implementation details.
+See the [OKF Foundation specification](docs/superpowers/specs/2026-08-02-okf-foundation-design.md)
+for implementation details.
 
 ---
 
 ## Demo
 
 <div align="center">
-  <img src="./assets/demo.gif" alt="pi-llm-wiki demo" width="1920" />
+  <img src="./assets/demo.gif" alt="dsh-llm-wiki demo" width="1920" />
 </div>
 
 ---
 
-## Quick Start
+## Quick Start — DeepSeek Harness
 
-**pi** ([`@mariozechner/pi-coding-agent`](https://github.com/badlogic/pi-mono)):
+Requirements: Node ≥ 22, pnpm 9.
 
-```bash
-pi install npm:@zosmaai/pi-llm-wiki
-```
-
-If npm 12 prints audit findings or an `install-scripts` warning during this
-install, that is the `@tobilu/qmd` and pi dependency trees, not this package:
-see [`docs/dependency-security.md`](docs/dependency-security.md).
-
-`@tobilu/qmd`, the optional package behind semantic search, is dropped without a
-warning by npm when its `typescript@^5.9.3` peer cannot be met. If
-`~/.pi/agent/npm/node_modules/@tobilu/qmd` is missing, [`docs/qmd-compatibility.md`](docs/qmd-compatibility.md#installing-on-npm-hosts)
-gives the one-line fix.
-
-**oh-my-pi** ([`omp`](https://github.com/can1357/oh-my-pi)):
+The plugin ships as a DSH **bundle** in [`dsh/`](dsh/). It is a local, private bundle
+(`dsh-llm-wiki`) — there is no npm release of this fork yet.
 
 ```bash
-omp install @zosmaai/pi-llm-wiki
+git clone https://github.com/ModerRAS/dsh-llm-wiki.git
+cd dsh-llm-wiki
+pnpm install
+pnpm build:dsh          # compiles src/dsh → dist/dsh/, which dsh/host-index.js re-exports
 ```
 
-Both hosts load the same extension, skill, and `/wiki-*` slash commands — see
-[Dual-host support](#dual-host-support-pi--oh-my-pi) for what differs.
+Then, in DeepSeek Harness:
 
-### Other harnesses via MCP
+1. Open `plugin_manager` → `install_bundle`.
+2. Point it at the **absolute** path of the `dsh/` directory in your clone,
+   e.g. `/Users/you/src/dsh-llm-wiki/dsh`.
+3. The plugin row `llm-wiki` activates on HMR. Open any project — with or without a
+   `.llm-wiki/` vault; it bootstraps silently.
 
-Claude Code, Codex, Cursor, Windsurf, Zed, Cline, and other MCP-capable
-harnesses use the packaged stdio server. Start with the Claude marketplace:
+You get, per project:
 
-```text
-/plugin marketplace add https://github.com/zosmaai/pi-llm-wiki
-/plugin install llm-wiki@zosmaai
-/reload-plugins
-```
+- the **LLM Wiki tools** (see [Tools](#tools)) available to the agent,
+- a **sidebar status panel** (`sidebar.panellist` → `main` page `wiki-status`) with live
+  vault state, backed by `GET /wiki/status.json`,
+- a **Settings → LLM Wiki** section for behaviour, and an **LLM Wiki synthesis** agent
+  preset for background work,
+- `/wiki-*` slash commands (see [Slash Commands](#slash-commands)).
 
-For every other MCP client, install the package and register
-`dist/mcp/index.js` as a local stdio server:
+> **Full host documentation:** [`docs/dsh.md`](docs/dsh.md) — install, settings
+> surfaces, locale channels, port decisions, and the live-verification checklist for
+> this draft v1.
 
-```bash
-npm install --save-dev @zosmaai/pi-llm-wiki@latest
-```
-
-If that install warns that install scripts were blocked, the `node-llama-cpp`
-and tree-sitter native builds were skipped and QMD retrieval will run
-lexical-only; [`docs/dependency-security.md`](docs/dependency-security.md) has
-the `npm install-scripts approve` commands.
-
-Use the client-specific JSON/TOML examples in
-[`docs/harnesses.md`](docs/harnesses.md). They cover Codex CLI, Cursor,
-Windsurf, Zed, Cline, and a generic MCP configuration. Set `WIKI_ROOT` to pin
-the vault; use an absolute server path because MCP clients do not expand `~`.
-
-The extension will proactively suggest creating a wiki on your first session. Alternatively:
+First run:
 
 ```
-/wiki-init "AI Engineering"
+/wiki-bootstrap "AI Engineering"
+/wiki-capture https://example.com/some-article
 /wiki-ingest
-/wiki-query What are the key patterns?
+/wiki-recall What are the key patterns?
 ```
 
 ---
 
-## Why This Package?
+## Other harnesses — MCP (not at the same time)
 
-Most file-based LLM workflows behave like one-shot RAG: the model searches raw documents every time you ask a question. Synthesis is ephemeral.
+Everything outside DeepSeek Harness reaches the same vault through the packaged stdio
+MCP server. Build it once:
 
-**pi-llm-wiki** creates a middle layer:
+```bash
+pnpm install
+pnpm build:mcp          # emits dist/mcp/index.js
+```
+
+Register the **absolute** path of `dist/mcp/index.js` as a local stdio server in your
+client (Claude Code, Codex CLI, Cursor, Windsurf, Zed, Cline):
+
+```json
+{
+  "mcpServers": {
+    "llm-wiki": {
+      "command": "node",
+      "args": ["/absolute/path/to/dsh-llm-wiki/dist/mcp/index.js"],
+      "env": { "WIKI_ROOT": "/absolute/path/to/my-wiki" }
+    }
+  }
+}
+```
+
+`WIKI_ROOT` pins the vault; when unset the server resolves it from the client's working
+directory. MCP clients spawn without a shell, so `~` is never expanded — always use
+absolute paths. Client-specific JSON/TOML examples live in
+[`docs/harnesses.md`](docs/harnesses.md).
+
+> ### ⚠️ One writer per vault
+> **The native DSH plugin and the MCP server must never run against the same vault at
+> the same time.** Both write `meta/` projections and both guard `raw/`; two writers
+> interleave rebuilds and confuse each other's locks. Use the native plugin inside
+> DeepSeek Harness, and MCP for every other client. Never mount both on one vault.
+
+The optional `@tobilu/qmd` package behind semantic search can be dropped silently by
+npm when its `typescript` peer cannot be met — see
+[`docs/qmd-compatibility.md`](docs/qmd-compatibility.md#installing-on-npm-hosts).
+
+---
+
+## Why a wiki instead of one-shot RAG?
+
+Most file-based LLM workflows behave like one-shot RAG: the model re-reads raw documents
+on every question and the synthesis is ephemeral.
+
+**dsh-llm-wiki** inserts a durable middle layer:
 
 - **Raw source packets** preserve source-of-truth inputs
 - **Source pages** summarize what each source says
 - **Canonical wiki pages** track what the wiki currently believes
 - **Generated metadata** keeps everything searchable and navigable
 
-The result is a wiki that **compounds** as you capture sources, ask questions, and file durable analyses.
+The wiki accretes as you capture sources, ask questions, and file durable analyses.
 
 ---
 
@@ -134,10 +156,10 @@ The result is a wiki that **compounds** as you capture sources, ask questions, a
 | 🧠 **Automated ingestion** | `wiki_ingest` batch-processes sources into concept, entity, synthesis & analysis pages |
 | 🔍 **Full-text search** | Generated registry with keyword lookup across all pages and sources |
 | 🩺 **Mechanical linting** | Orphans, broken links, duplicate aliases, coverage gaps, stale captures |
-| 📊 **Dashboard** | `wiki_status` — counts, source states, recent activity |
+| 📊 **Dashboard** | `wiki_status` — counts, source states, recent activity; plus the WebUI sidebar panel |
 | 🤖 **Auto-update watch** | `wiki_watch` — print a `crontab` line that runs the full cycle on a schedule |
 | 🧠 **Layered recall** | Searches both personal (`~/.llm-wiki/`) and project (`.llm-wiki/`) vaults — personal knowledge follows you everywhere |
-| 📝 **Auto-bootstrap** | Extension suggests creating a wiki when none exists in the current directory |
+| 📝 **Auto-bootstrap** | The plugin suggests creating a wiki when none exists in the current directory |
 | 💾 **Lightweight capture** | `wiki_retro` — save atomic insights as a single markdown file; full 4-layer pipeline also available via `wiki_capture_source` |
 | 🧭 **Agent working-memory** _(opt-in)_ | `wiki_capture_trajectory` records *how* a task was solved (tool-call trajectory) → distill into reusable `skill`/`case` pages → `wiki_recall_skill` surfaces them next time. Off by default; enable with `/wiki-trajectories on` |
 | 🌐 **OKF v0.2 native** | Portable Open Knowledge Format documents, dual-read legacy compatibility, deterministic projections |
@@ -145,7 +167,7 @@ The result is a wiki that **compounds** as you capture sources, ask questions, a
 | 📝 **Obsidian-friendly** | Folder-qualified wikilinks, stable source-ID citations, compatible vault |
 | 🛡️ **Guardrails** | Blocks direct edits to raw sources and generated metadata |
 | 🔧 **Configurable PDF extraction** | MarkItDown timeout via `WIKI_MARKITDOWN_TIMEOUT_MS` env var |
-| 🧪 **Quality checks** | TypeScript, Vitest, Biome, Codecov, CodeQL |
+| 🧪 **Quality checks** | TypeScript, Vitest, Biome, CodeQL |
 
 ---
 
@@ -172,37 +194,33 @@ The result is a wiki that **compounds** as you capture sources, ask questions, a
 | `wiki_distill_skills` _(opt-in)_ | Batch undistilled trajectories for synthesis into reusable skill pages |
 | `wiki_recall_skill` _(opt-in)_ | Recall distilled skills + similar past cases — "have I done this before?" |
 
-> The three agent-trajectory tools are **off by default** (issue #80). Enable them with `/wiki-trajectories on` (sets `llm-wiki.trajectories`); when off they are not registered at all.
+> The three agent-trajectory tools are **off by default**. Enable them with
+> `/wiki-trajectories on` (sets `llm-wiki.trajectories`); when off they are not
+> registered at all.
 
 ### Slash Commands
 
+DeepSeek Harness slash commands are defined in
+[`src/dsh/commands.ts`](src/dsh/commands.ts). Pure queries answer directly; commands that
+start work queue a follow-up prompt so the agent keeps owning the write path.
+
 | Command | Description |
 |---------|-------------|
-| `/wiki-init <topic>` | Initialize a new LLM Wiki vault |
-| `/wiki-ingest [path]` | Process new source files and update the wiki |
-| `/wiki-query <question>` | Ask questions against the wiki with citations |
-| `/wiki-discover [--topic <topic>]` | Auto-discover new sources from the web |
-| `/wiki-run [--schedule daily\|weekly]` | Full cycle: discover → ingest → lint |
-| `/wiki-lint [--fix]` | Health check (orphans, contradictions, gaps) |
-| `/wiki-status` | Show a concise operational summary |
-| `/wiki-digest [--period daily\|weekly]` | Generate a digest of recent activity |
-| `/wiki-retro` | Save atomic insights from completed tasks |
-| `/wiki-model [provider/id | session]` | Set the background-task model (interactive picker when run without arguments) |
-| `/wiki-req <concept>` | Decompose a concept into atomic, traceable requirement pages |
-| `/wiki-trajectories <on\|off>` | Enable/disable agent working-memory (opt-in, off by default) |
-| `/wiki-record <title>` | Capture the completed task's trajectory (requires trajectories enabled) |
-| `/wiki-skills [query]` | Search distilled skills + past cases (requires trajectories enabled) |
-| `/wiki-settings` | Interactive settings screen — view and change all `llm-wiki` settings in project or global scope |
-| `/wiki-dashboard` | Read-only vault dashboard — page counts/types, freshness, 7-day activity, ingest queue, zero-backlink pages, embedding coverage |
+| `/wiki-status` | Report LLM Wiki health and stats for this project |
+| `/wiki-search <query>` | Search the wiki registry for pages matching a query |
+| `/wiki-recall <task>` | Recall wiki pages relevant to the given task or question |
+| `/wiki-lint [--fix]` | Check wiki health (orphans, missing pages, gaps) |
+| `/wiki-bootstrap <topic>` | Initialize an LLM Wiki vault here |
+| `/wiki-capture <url \| path \| text>` | Capture a source into the wiki |
+| `/wiki-ingest` | Ingest captured sources into wiki pages (background synthesis) |
+| `/wiki-model [provider/id \| clear]` | Show or set the background synthesis model |
+| `/wiki-trajectories [on \| off]` | Enable/disable agent working-memory (opt-in, off by default) |
 
-<img src="./assets/wiki-dashboard.png" alt="wiki-dashboard: read-only vault health screen" width="100%" />
-
+<img src="./assets/wiki-dashboard.png" alt="wiki status panel: read-only vault health" width="100%" />
 
 ---
 
 ## Layered Vault Architecture
-
-Knowledge follows you everywhere. pi-llm-wiki uses a layered vault system:
 
 | Layer | Location | Purpose |
 |-------|----------|---------|
@@ -218,27 +236,20 @@ Knowledge follows you everywhere. pi-llm-wiki uses a layered vault system:
 4. `wiki_retro` writes to whichever vault is active (project takes priority)
 5. Set `WIKI_HOME` env var to override the personal wiki location
 
-This means: you can have a project wiki for team documentation **and** a personal wiki for your own notes, and recall searches both simultaneously.
+So you can keep a project wiki for team documentation **and** a personal wiki for your
+own notes, and recall searches both at once.
 
 ---
 
-## Quick Start (Detailed)
+## Quick Start (Manual Walkthrough)
 
 ### 1) Create a new wiki
 
 ```bash
-mkdir my-wiki
-cd my-wiki
-pi
+mkdir my-wiki && cd my-wiki && dsh
 ```
 
-Ask pi:
-
-```
-Initialize an llm wiki here for AI research.
-```
-
-This calls `wiki_bootstrap` and creates:
+Then `/wiki-bootstrap "AI Research"`, which creates:
 
 ```
 .llm-wiki/
@@ -253,15 +264,9 @@ This calls `wiki_bootstrap` and creates:
 ### 2) Capture a source
 
 ```
-Capture this article into the wiki: https://example.com/some-article
-```
-
-```
-Capture this PDF into the wiki: ./papers/context-windows.pdf
-```
-
-```
-Capture these notes into the wiki: ...pasted text...
+/wiki-capture https://example.com/some-article
+/wiki-capture ./papers/context-windows.pdf
+/wiki-capture <pasted notes>
 ```
 
 ### 3) Integrate the source
@@ -280,7 +285,7 @@ Capture these notes into the wiki: ...pasted text...
 Based on the wiki, what are the main tradeoffs between long-context models and RAG?
 ```
 
-By default, query mode is **read-only**. To file a durable answer:
+By default, query mode is **read-only**. To file a durable answer, ask explicitly:
 
 ```
 Answer the question and file the result as an analysis page.
@@ -322,8 +327,6 @@ my-wiki/
 
 | Path | Owner | Rule |
 |------|-------|------|
-| Path | Owner | Rule |
-|------|-------|------|
 | `.llm-wiki/raw/**` | Extension tools | Immutable after capture |
 | `.llm-wiki/wiki/**` | Model + user | Editable knowledge pages |
 | `.llm-wiki/meta/registry.json` | Extension | Generated |
@@ -336,11 +339,18 @@ my-wiki/
 
 ### Activity history, backup, and portability
 
-`meta/events.jsonl` is the authoritative source for recorded extension activity. Unlike registry, backlinks, indexes, logs, and embeddings, it cannot be rebuilt from wiki pages or raw packets. Preserve it when backing up or Git-synchronizing a complete pi-llm-wiki vault.
+`meta/events.jsonl` is the authoritative source for recorded extension activity. Unlike
+registry, backlinks, indexes, logs, and embeddings, it cannot be rebuilt from wiki pages
+or raw packets. Preserve it when backing up or Git-synchronizing a complete vault.
 
-`meta/log.md` and OKF-mode `wiki/log.md` are generated views. `wiki/log.md` can travel with the OKF bundle as a readable snapshot, but it cannot reconstruct or resume the originating JSONL stream. Manual page edits are intentionally absent, so this is selected extension activity rather than a complete revision audit.
+`meta/log.md` and OKF-mode `wiki/log.md` are generated views. `wiki/log.md` can travel
+with the OKF bundle as a readable snapshot, but it cannot reconstruct or resume the
+originating JSONL stream. Manual page edits are intentionally absent, so this is selected
+extension activity rather than a complete revision audit.
 
-File-capture events omit machine-local paths from the public log projection. Callers of `wiki_log_event` still control arbitrary detail fields and must not record secrets or private host paths.
+File-capture events omit machine-local paths from the public log projection. Callers of
+`wiki_log_event` still control arbitrary detail fields and must not record secrets or
+private host paths.
 
 ---
 
@@ -366,7 +376,7 @@ Stable source-page IDs keep provenance stable even if titles change.
 
 ## Guardrails
 
-The extension **blocks** direct tool-call edits to:
+The plugin **blocks** direct tool-call edits to:
 
 - `.llm-wiki/raw/**` — immutable source artifacts
 - `.llm-wiki/meta/registry.json`
@@ -376,7 +386,8 @@ The extension **blocks** direct tool-call edits to:
 - `.llm-wiki/meta/log.md`
 - `.llm-wiki/meta/lint-report.md`
 
-If the model directly edits `.llm-wiki/wiki/**` using Pi's built-in `write` or `edit` tools, the extension **automatically rebuilds** generated metadata at the end of the agent turn.
+If the model edits `.llm-wiki/wiki/**` with ordinary `write`/`edit` tools, generated
+metadata is **rebuilt automatically** at the end of the agent turn.
 
 ---
 
@@ -392,131 +403,8 @@ Each captured source is stored as a structured packet:
 └─ attachments/      # Future attachment downloads
 ```
 
-This preserves both the **original artifact** and a **normalized extracted view** for reading.
-
----
-
-## MCP Server
-
-Use the wiki from **any MCP-compatible tool** — Claude Code, Cursor, Windsurf, and others.
-
-The package ships a standalone MCP server exposing 15 wiki tools over stdio:
-
-| Tool | Description |
-|------|-------------|
-| `wiki_bootstrap` | Initialize a vault |
-| `wiki_recall` | Search relevant wiki pages |
-| `wiki_search` | Search the registry |
-| `wiki_status` | Show wiki health and counts |
-| `wiki_retro` | Save an atomic insight |
-| `wiki_capture_source` | Capture a source packet |
-| `wiki_ingest` | Synthesize captured sources synchronously over the configured task model |
-| `wiki_reindex` | Rebuild/repair QMD indexes |
-| `wiki_ensure_page` | Safely create a canonical page |
-| `wiki_lint` | Run deterministic health checks |
-| `wiki_log_event` | Append an activity event |
-| `wiki_observe` | Save a timestamped observation |
-| `wiki_rebuild_meta` | Rebuild metadata projections |
-| `wiki_reindex_embeddings` | Refresh semantic embeddings |
-| `wiki_watch` | Print an update cron line |
-
-### Usage
-
-```bash
-# Auto-discovered by pi:
-pi install npm:@zosmaai/pi-llm-wiki
-
-# Standalone with any MCP client:
-WIKI_ROOT=~/my-wiki node node_modules/@zosmaai/pi-llm-wiki/dist/mcp/index.js
-```
-
-Set `WIKI_ROOT` to your wiki vault directory. If unset, the server auto-detects from the current working directory.
-
-### Claude marketplace installation
-
-```text
-/plugin marketplace add https://github.com/zosmaai/pi-llm-wiki
-/plugin install llm-wiki@zosmaai
-/reload-plugins
-```
-
-### Client configuration
-
-The same server as an entry in `.mcp.json` (Claude Code) or `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "llm-wiki": {
-      "command": "node",
-      "args": ["/absolute/path/to/node_modules/@zosmaai/pi-llm-wiki/dist/mcp/index.js"],
-      "env": { "WIKI_ROOT": "/absolute/path/to/my-wiki" }
-    }
-  }
-}
-```
-
-> MCP clients spawn the command **without a shell**, so `~` is never expanded. A `~/my-wiki` in `args` or `env` is passed through literally and the server fails to start, which the client reports only as a generic connection error — use absolute paths here. The shell snippet above is fine: your shell expands `~` before `node` sees it.
-
----
-
-## Dual-host support (pi + oh-my-pi)
-
-The package targets two hosts from a single codebase:
-
-| | **pi** (`@mariozechner/pi-coding-agent`) | **oh-my-pi** (`omp`) |
-|---|---|---|
-| Extension entry | `package.json#pi.extensions` | `package.json#omp.extensions` (falls back to `#pi`) |
-| Skill | `skills/llm-wiki/SKILL.md` via `pi.skills` | same file, found by directory convention |
-| Slash commands | `prompts/*.md` via `pi.prompts` | `commands/*.md` (generated mirror of `prompts/`) |
-| Project config | `<cwd>/.pi/settings.json` | `<cwd>/.omp/settings.json`, then `.omp/config.yml` |
-| User config | `~/.pi/agent/settings.json` | `~/.omp/agent/settings.json`, then `config.yml` |
-| MCP server | auto-registered via `pi.mcpservers` | register manually (see below) |
-| Ambient surfaces without a project wiki | on (personal vault) | off — see below |
-
-No source changes are needed for the imports: oh-my-pi rewrites
-`@mariozechner/pi-*` and bare `typebox` specifiers onto its own bundled
-packages when it loads a legacy extension.
-
-**Settings are read from both layouts.** `llm-wiki` config is merged from every
-file above, host-native directory last. A vault configured under pi keeps
-working after `omp` takes over the same repository, and writes land in whichever
-config directory already exists (so a `.pi`-only repo does not sprout a second
-settings file). Writes are always JSON — a hand-authored `config.yml` is read
-but never rewritten.
-
-Set `LLM_WIKI_HOST=pi|omp` to override host detection; by default it is derived
-from the resolved agent directory.
-
-**Ambient surfaces are gated under oh-my-pi.** The session notice, the periodic
-observe/retro reminder, and `before_agent_start` recall all fire unprompted, and
-vault resolution falls back to the personal vault — so once `~/.llm-wiki/`
-exists they would speak up in *every* directory. Under pi that is the historical
-behaviour and it is kept; under omp the plugin is installed once and loads in
-every project, so a repository that never ran `/wiki-init` stays quiet. Override
-either default with `llm-wiki.ambientPersonalVault`. The wiki tools and slash
-commands are registered regardless, so `/wiki-init` always works — and a project
-with its own `.llm-wiki/` gets every surface back.
-
-**MCP under oh-my-pi.** `pi.mcpservers` is a pi-only manifest key, and the
-server's vault auto-detection depends on the client's working directory, so it
-cannot be declared with a relative path. Register it explicitly instead:
-
-```jsonc
-// <cwd>/.omp/.mcp.json
-{
-  "mcpServers": {
-    "llm-wiki": {
-      "command": "node",
-      "args": ["/abs/path/to/node_modules/@zosmaai/pi-llm-wiki/dist/mcp/index.js"],
-      "env": { "WIKI_ROOT": "/abs/path/to/your/wiki" }
-    }
-  }
-}
-```
-
-You rarely need it: under either host the extension already registers the same
-capabilities as native tools.
+This preserves both the **original artifact** and a **normalized extracted view** for
+reading.
 
 ---
 
@@ -536,22 +424,18 @@ The bundled `llm-wiki` skill teaches the model to:
 
 ## Architecture
 
-### Vault Layers
-
-See the [Layered Vault Architecture](#layered-vault-architecture) section above for the personal/project/company layering.
-
 ### Four-Layer Page Model
-
-Each wiki vault has four layers with clear ownership:
 
 ```
 .llm-wiki/raw/sources/SRC-*/     # Immutable source packets (extension-owned)
-.llm-wiki/wiki/                   # Editable knowledge pages (you + LLM)
-.llm-wiki/meta/                   # Durable event source + generated internal projections
-.llm-wiki/                        # Config and templates
+.llm-wiki/wiki/                  # Editable knowledge pages (you + LLM)
+.llm-wiki/meta/                  # Durable event source + generated internal projections
+.llm-wiki/                       # Config and templates
 ```
 
-Read [docs/architecture.md](docs/architecture.md) for the full design document.
+Read [docs/architecture.md](docs/architecture.md) for the full design document, and
+[docs/dsh.md](docs/dsh.md) for how the DSH port maps onto the host (bundles, slots,
+WebUI surfaces, synthesis lane).
 
 ---
 
@@ -559,37 +443,46 @@ Read [docs/architecture.md](docs/architecture.md) for the full design document.
 
 | Document | What it covers |
 |----------|---------------|
+| [DeepSeek Harness plugin](docs/dsh.md) | **Start here** — DSH install, settings, sidebar, locale, port decisions |
 | [Architecture](docs/architecture.md) | How the four layers work, ownership model |
-| [Commands](docs/commands.md) | All slash commands and tool reference |
+| [Commands](docs/commands.md) | Slash commands and tool reference |
 | [Obsidian Integration](docs/obsidian.md) | Vault setup and recommended plugins |
 | [Configuration](docs/configuration.md) | Wiki modes, topics, environment variables |
-| [API](docs/api.md) | Extension tool parameter reference |
+| [API](docs/api.md) | Tool parameter reference |
+| [Harnesses](docs/harnesses.md) | MCP client configuration for non-DSH harnesses |
+
+---
+
+## Project Status
+
+The DSH plugin is **draft v1**: logic is unit-covered under [`test/dsh/`](test/dsh/) with
+no harness required, while the host-interaction checklist in
+[`docs/dsh.md`](docs/dsh.md#draft-status--verify-live-before-merging) still needs a live
+DeepSeek Harness pass before it is promoted.
+
+The upstream pi extension (`extensions/llm-wiki/`) and the MCP server (`mcp/`) remain in
+the tree — MCP stays as the cross-harness path; the pi extension is kept for one release
+cycle.
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, test patterns, and PR workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, test patterns, and PR
+workflow.
 
 ---
 
-<div align="center">
-  <a href="https://github.com/zosmaai/pi-llm-wiki/stargazers">
-    <img src="./assets/thank-you-for-the-star.png" alt="Thank you for starring pi-llm-wiki!" width="100%" />
-  </a>
-  <br/>
-  <sub>
-    If you find pi-llm-wiki useful,
-    <a href="https://github.com/zosmaai/pi-llm-wiki">⭐ star the repo</a> —
-    it lets us know we're building something that matters.
-  </sub>
-</div>
+## Credits & License
 
-<br/>
+Built by [zosmaai](https://github.com/zosmaai) as
+[`pi-llm-wiki`](https://github.com/zosmaai/pi-llm-wiki); this fork maintains the native
+DeepSeek Harness port. MIT licensed — see [LICENSE](LICENSE).
 
 ## Contributors
 
-Thanks to everyone who has contributed! This list is regenerated automatically by [`.github/workflows/contributors.yml`](.github/workflows/contributors.yml) — see [#60](https://github.com/zosmaai/pi-llm-wiki/issues/60) for the rationale.
+Thanks to everyone who has contributed upstream! This list is regenerated automatically
+by [`.github/workflows/contributors.yml`](.github/workflows/contributors.yml).
 
 <!-- readme: contributors -start -->
 <table>
@@ -686,20 +579,8 @@ Thanks to everyone who has contributed! This list is regenerated automatically b
 </table>
 <!-- readme: contributors -end -->
 
-<sub>Full history: [contributors graph](https://github.com/zosmaai/pi-llm-wiki/graphs/contributors).</sub>
-
 ---
 
 <div align="center">
-  <sub>Built with ❤️ by <a href="https://github.com/zosmaai">zosmaai</a> · </sub>
-  <a href="https://pi.dev">pi.dev</a> · <a href="https://github.com/zosmaai/pi-llm-wiki/issues">Issues</a>
+  <sub>DSH port maintained at <a href="https://github.com/ModerRAS/dsh-llm-wiki">ModerRAS/dsh-llm-wiki</a> · upstream <a href="https://github.com/zosmaai/pi-llm-wiki">zosmaai/pi-llm-wiki</a> · <a href="https://github.com/ModerRAS/dsh-llm-wiki/issues">Issues</a></sub>
 </div>
-
-## License
-
-MIT
-
-## Harness support
-
-Runs natively in pi, and as an MCP server in Claude Code (plugin), Codex,
-Cursor, Windsurf, Zed and opencode. See [docs/harnesses.md](docs/harnesses.md).
